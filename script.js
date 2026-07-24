@@ -18,6 +18,10 @@ const CAPAS = [
 // Mapa base centrado en Azuay, Ecuador
 const mapa = L.map("mapa", { zoomControl: true }).setView([-2.9, -79.0], 10);
 
+mapa.createPane("pane-polygon").style.zIndex = 200;
+mapa.createPane("pane-line").style.zIndex = 300;
+mapa.createPane("pane-point").style.zIndex = 400;
+
 // Varias opciones de mapa base para elegir
 const baseCalles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap", maxZoom: 19
@@ -195,8 +199,12 @@ function redibujarCapa(capa) {
 
   const featuresFiltradas = featuresPorCapa[capa.id].filter(f => featureVisible(capa.id, f.properties));
 
+  const paneMap = { point: "pane-point", line: "pane-line", polygon: "pane-polygon" };
+  const pane = paneMap[capa.tipo] || "overlayPane";
+
   const layer = L.geoJSON(featuresFiltradas, {
     ...estiloCapa(capa),
+    pane,
     onEachFeature: (feature, lyr) => lyr.bindPopup(popupHTML(feature.properties))
   });
 
