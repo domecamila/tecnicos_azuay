@@ -119,10 +119,87 @@ function actualizarTiempoTraslado() {
   const km = prom("dist_km");
   set("ind-tiempo", `${min.toFixed(0)} min / ${km.toFixed(1)} km`);
 }
-function popupHTML(props) {
-  return Object.entries(props)
-    .filter(([k]) => k !== "geom" && k !== "geojson")
-    .map(([k, v]) => `<b>${k}:</b> ${v ?? "-"}`)
+const POPUP_CAMPOS = {
+  distrital: [
+    ["nombre", "Oficina"],
+  ],
+  domicilios: [
+    ["a2_nombres", "Técnico"],
+    ["b1__provin", "Provincia"],
+    ["b2__cantó", "Cantón"],
+    ["b3__parroq", "Parroquia"],
+    ["a1__númer", "Cédula"],
+    ["b4__calle_", "Calle principal"],
+    ["b5__númer", "N.º calle"],
+    ["b6__calle_", "Calle secundaria"],
+  ],
+  rutas: [
+    ["tiempo_min", "Tiempo de traslado (min)"],
+    ["dist_km", "Distancia de traslado (km)"],
+  ],
+  asistencias: [
+    ["nombre_pro", "Provincia"],
+    ["nombre_can", "Cantón"],
+    ["nombre_par", "Parroquia"],
+    ["cedula_pro", "Cédula"],
+    ["fecha_anio", "Año"],
+    ["fecha_mes_", "Mes"],
+    ["fecha_dia_", "Día"],
+    ["aer_vis", "AER"],
+    ["tipo_vis", "Tipo de visita"],
+    ["categoria_", "Categoría"],
+    ["tematica", "Temática"],
+    ["actividad_", "Actividad"],
+    ["rubro_ava", "Rubro"],
+  ],
+  poligonos_asistencias: [
+    ["cedula_tec", "Cédula técnico"],
+    ["tecnico_ma", "Técnico"],
+  ],
+  area_distribucion: [
+    ["nombre", "Nombre"],
+    ["cedula", "Cédula"],
+  ],
+  buffer500: [
+    ["b4__calle_", "Calle principal"],
+    ["b5__númer", "N.º calle"],
+    ["b6__calle_", "Calle secundaria"],
+    ["a2_nombres", "Técnico"],
+    ["b1__provin", "Provincia"],
+    ["b2__cantó", "Cantón"],
+    ["b3__parroq", "Parroquia"],
+  ],
+  buffer1000: [
+    ["b4__calle_", "Calle principal"],
+    ["b5__númer", "N.º calle"],
+    ["b6__calle_", "Calle secundaria"],
+    ["a2_nombres", "Técnico"],
+    ["b1__provin", "Provincia"],
+    ["b2__cantó", "Cantón"],
+    ["b3__parroq", "Parroquia"],
+  ],
+  buffer5000: [
+    ["b4__calle_", "Calle principal"],
+    ["b5__númer", "N.º calle"],
+    ["b6__calle_", "Calle secundaria"],
+    ["a2_nombres", "Técnico"],
+    ["b1__provin", "Provincia"],
+    ["b2__cantó", "Cantón"],
+    ["b3__parroq", "Parroquia"],
+  ],
+};
+
+function popupHTML(props, capaId) {
+  const campos = POPUP_CAMPOS[capaId];
+  if (!campos) {
+    return Object.entries(props)
+      .filter(([k]) => k !== "geom" && k !== "geojson")
+      .map(([k, v]) => `<b>${k}:</b> ${v ?? "-"}`)
+      .join("<br>");
+  }
+  return campos
+    .filter(([k]) => k in props)
+    .map(([k, label]) => `<b>${label}:</b> ${props[k] ?? "-"}`)
     .join("<br>");
 }
 
@@ -143,6 +220,17 @@ function construirColoresPorTecnico() {
 }
 
 function estiloCapa(capa) {
+  if (capa.id === "distrital") {
+    const officeIcon = L.divIcon({
+      html: '<div style="font-size:22px;line-height:1;text-align:center;filter:drop-shadow(1px 1px 2px rgba(0,0,0,.4))">🏛️</div>',
+      className: "",
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    });
+    return {
+      pointToLayer: (f, latlng) => L.marker(latlng, { icon: officeIcon })
+    };
+  }
   if (capa.tipo === "point") {
     return {
       pointToLayer: (f, latlng) => L.circleMarker(latlng, {
@@ -205,7 +293,7 @@ function redibujarCapa(capa) {
   const layer = L.geoJSON(featuresFiltradas, {
     ...estiloCapa(capa),
     pane,
-    onEachFeature: (feature, lyr) => lyr.bindPopup(popupHTML(feature.properties))
+    onEachFeature: (feature, lyr) => lyr.bindPopup(popupHTML(feature.properties, capa.id))
   });
 
   capasActivas[capa.id] = layer;
