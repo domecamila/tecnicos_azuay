@@ -4,15 +4,15 @@
 // "tipo"  = point | line | polygon, para saber cómo dibujarla.
 // ---------------------------------------------------------------
 const CAPAS = [
-  { id: "distrital", vista: "distrital_geojson", tipo: "point", color: "#2B2B26" },
-  { id: "domicilios", vista: "domicilios_geojson", tipo: "point", color: "#2F4B3C" },
-  { id: "asistencias", vista: "asistencias_geojson", tipo: "point", color: "#C1892F" },
-  { id: "rutas", vista: "rutas_geojson", tipo: "line", color: "#A24936" },
-  { id: "area_distribucion", vista: "area_distribucion_geojson", tipo: "polygon", color: "#9DBBA8" },
-  { id: "poligonos_asistencias", vista: "poligonos_asistencias_geojson", tipo: "polygon", color: "#E3C48C" },
-  { id: "buffer500", vista: "buffer500_geojson", tipo: "polygon", color: "#5C7A8A" },
-  { id: "buffer1000", vista: "buffer1000_geojson", tipo: "polygon", color: "#5C7A8A" },
   { id: "buffer5000", vista: "buffer5000_geojson", tipo: "polygon", color: "#5C7A8A" },
+  { id: "buffer1000", vista: "buffer1000_geojson", tipo: "polygon", color: "#5C7A8A" },
+  { id: "buffer500", vista: "buffer500_geojson", tipo: "polygon", color: "#5C7A8A" },
+  { id: "poligonos_asistencias", vista: "poligonos_asistencias_geojson", tipo: "polygon", color: "#E3C48C" },
+  { id: "area_distribucion", vista: "area_distribucion_geojson", tipo: "polygon", color: "#9DBBA8" },
+  { id: "rutas", vista: "rutas_geojson", tipo: "line", color: "#A24936" },
+  { id: "asistencias", vista: "asistencias_geojson", tipo: "point", color: "#C1892F" },
+  { id: "domicilios", vista: "domicilios_geojson", tipo: "point", color: "#2F4B3C" },
+  { id: "distrital", vista: "distrital_geojson", tipo: "point", color: "#2B2B26" },
 ];
 
 // Mapa base centrado en Azuay, Ecuador
