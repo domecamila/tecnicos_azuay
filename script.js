@@ -279,12 +279,27 @@ function featureVisible(capaId, props) {
 
 // Descarga los datos crudos (GeoJSON) de una capa desde Supabase
 async function descargarCapa(capa) {
-  const resp = await fetch(`${SUPABASE_URL}${capa.vista}?select=*`, {
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  });
-  if (!resp.ok) throw new Error(`${capa.vista}: ${resp.status}`);
-  const filas = await resp.json();
-  return filas
+  const PAGE_SIZE = 1000;
+  let offset = 0;
+  let todas = [];
+
+  while (true) {
+    const resp = await fetch(`${SUPABASE_URL}${capa.vista}?select=*`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        Range: `${offset}-${offset + PAGE_SIZE - 1}`,
+        Prefer: "count=exact",
+      }
+    });
+    if (!resp.ok) throw new Error(`${capa.vista}: ${resp.status}`);
+    const filas = await resp.json();
+    todas = todas.concat(filas);
+    if (filas.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+
+  return todas
     .filter(f => f.geojson)
     .map(f => ({ type: "Feature", geometry: JSON.parse(f.geojson), properties: f }));
 }
