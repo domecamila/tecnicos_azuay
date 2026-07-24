@@ -530,3 +530,123 @@ document.getElementById("btn-limpiar-filtros").addEventListener("click", () => {
 });
 
 iniciar();
+
+// =============================================
+// Chatbot IA
+// =============================================
+(function() {
+  const chatToggle = document.getElementById("chatbot-toggle");
+  const chatPanel = document.getElementById("chatbot-panel");
+  const chatClose = document.getElementById("chatbot-close");
+  const chatMessages = document.getElementById("chatbot-messages");
+  const chatInput = document.getElementById("chatbot-text");
+  const chatSend = document.getElementById("chatbot-send");
+  const chatApi = document.getElementById("chatbot-api");
+  const chatKeyInput = document.getElementById("chatbot-key");
+  const chatKeySave = document.getElementById("chatbot-key-save");
+
+  let apiKey = localStorage.getItem("openai_api_key") || "";
+
+  function togglePanel() {
+    chatPanel.classList.toggle("open");
+  }
+  chatToggle.addEventListener("click", togglePanel);
+  chatClose.addEventListener("click", togglePanel);
+
+  if (apiKey) {
+    chatApi.classList.remove("visible");
+    chatInput.disabled = false;
+    chatSend.disabled = false;
+  } else {
+    chatApi.classList.add("visible");
+  }
+
+  chatKeySave.addEventListener("click", () => {
+    const k = chatKeyInput.value.trim();
+    if (!k) return;
+    apiKey = k;
+    localStorage.setItem("openai_api_key", k);
+    chatApi.classList.remove("visible");
+    chatInput.disabled = false;
+    chatSend.disabled = false;
+    chatInput.focus();
+  });
+
+  function addMsg(text, cls) {
+    const div = document.createElement("div");
+    div.className = `chat-msg ${cls}`;
+    div.textContent = text;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return div;
+  }
+
+  function buildContext() {
+    const ctx = [];
+    for (const capa of CAPAS) {
+      const feats = featuresPorCapa[capa.id] || [];
+      if (!feats.length) continue;
+      const muestra = feats.slice(0, 5);
+      const campos = muestra.map(f => {
+        const p = { ...f.properties };
+        delete p.geom;
+        delete p.geojson;
+        return JSON.stringify(p);
+      });
+      ctx.push(`Capa "${capa.id}" (${feats.length} registros, mostrando ${muestra.length}):\n${campos.join("\n")}`);
+    }
+    const filtrosActivos = [];
+    if (FILTROS.tecnico !== "todos") filtrosActivos.push(`técnico=${FILTROS.tecnico}`);
+    if (FILTROS.desde) filtrosActivos.push(`desde=${FILTROS.desde.toISOString().slice(0,10)}`);
+    if (FILTROS.hasta) filtrosActivos.push(`hasta=${FILTROS.hasta.toISOString().slice(0,10)}`);
+    if (filtrosActivos.length) ctx.push(`Filtros activos: ${filtrosActivos.join(", ")}`);
+    return ctx.join("\n\n");
+  }
+
+  async function enviar() {
+    const texto = chatInput.value.trim();
+    if (!texto || !apiKey) return;
+    chatInput.value = "";
+
+    addMsg(texto, "chat-user");
+    const loading = addMsg("Pensando...", "chat-loading");
+
+    const context = buildContext();
+    const systemPrompt = `Eres un asistente geográfico del Geoportal de Distribución de Técnicos en Azuay, Ecuador. Responde en español de forma breve y clara. Tienes acceso a estos datos del geoportal:\n\n${context}\n\nResponde SOLO basándote en los datos disponibles. Si no tienes información para una pregunta, di que no puedes responderla.`;
+
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-3.5-turbo",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: texto },
+          ],
+          max_tokens: 500,
+          temperature: 0.3,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Error ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      const reply = data.choices?.[0]?.message?.content || "No obtuve respuesta.";
+      loading.remove();
+      addMsg(reply, "chat-bot");
+    } catch (err) {
+      loading.remove();
+      addMsg(`Error: ${err.message}`, "chat-loading");
+    }
+  }
+
+  chatSend.addEventListener("click", enviar);
+  chatInput.addEventListener("keydown", e => { if (e.key === "Enter") enviar(); });
+})();
