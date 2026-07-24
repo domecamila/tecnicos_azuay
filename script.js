@@ -723,6 +723,138 @@ iniciar();
       </ul>`;
     }
 
+    // Detectar superlativos: "quien tiene mas/menos", "tecnico con mayor/menor"
+    const esSuperlativo = norm.includes("mayor") || norm.includes("menor") || norm.includes("mas ") || norm.includes("menos ") || norm.includes("maximo") || norm.includes("minimo") || norm.includes("el que mas") || norm.includes("el que menos") || norm.includes("quien tiene mas") || norm.includes("quien tiene menos") || norm.includes("cual es el") || norm.includes("cuál es el");
+    if (esSuperlativo) {
+      const esMayor = norm.includes("mayor") || norm.includes("mas ") || norm.includes("maximo") || norm.includes("el que mas") || norm.includes("quien tiene mas");
+      const esMenor = norm.includes("menor") || norm.includes("menos ") || norm.includes("minimo") || norm.includes("el que menos") || norm.includes("quien tiene menos");
+
+      // ¿Qué campo? tiempo, distancia, asistencias
+      const esTiempo = norm.includes("tiempo") || norm.includes("minuto") || norm.includes("min");
+      const esDistancia = norm.includes("distancia") || norm.includes("km") || norm.includes("kilometro");
+      const esAsistencias = norm.includes("asistencia");
+      const esRural = norm.includes("rural");
+
+      if (esTiempo || esDistancia) {
+        // Buscar en rutas el técnico con mayor/menor tiempo o distancia
+        let rutas = featuresPorCapa["rutas"] || [];
+        if (!rutas.length) return "No hay datos de rutas.";
+
+        const campo = esDistancia ? "dist_km" : "tiempo_min";
+        const campoLabel = esDistancia ? "distancia" : "tiempo";
+
+        // Agrupar por técnico
+        const porTecnico = {};
+        rutas.forEach(f => {
+          const id = String(f.properties.id_tec || "");
+          const nombre = f.properties.tecnico_ma || id;
+          if (!id) return;
+          if (!porTecnico[id]) porTecnico[id] = { nombre, total: 0, count: 0 };
+          porTecnico[id].total += parseFloat(f.properties[campo]) || 0;
+          porTecnico[id].count++;
+        });
+
+        const lista = Object.values(porTecnico)
+          .map(t => ({ ...t, promedio: t.total / t.count }))
+          .sort((a, b) => esMayor ? b.promedio - a.promedio : a.promedio - b.promedio);
+
+        if (!lista.length) return "No se encontraron datos.";
+
+        const mejor = lista[0];
+        const unidad = esDistancia ? "km" : "min";
+        respuestas.push(`<strong>Técnico con ${esMayor ? "mayor" : "menor"} ${campoLabel} de traslado:</strong>`);
+        respuestas.push("<ul>");
+        respuestas.push(`<li><strong>${mejor.nombre}</strong>: ${mejor.promedio.toFixed(1)} ${unidad} promedio (${mejor.count} ruta(s))</li>`);
+        if (lista.length > 1) {
+          respuestas.push("<li><em>Top 5:</em></li>");
+          lista.slice(0, 5).forEach((t, i) => {
+            respuestas.push(`<li>${i + 1}. ${t.nombre}: ${t.promedio.toFixed(1)} ${unidad}</li>`);
+          });
+        }
+        respuestas.push("</ul>");
+        return respuestas.join("");
+      }
+
+      if (esAsistencias) {
+        // Buscar técnico con más/menos asistencias
+        let asist = featuresPorCapa["asistencias"] || [];
+        if (fechas) { asist = asist.filter(f => { const fecha = parseFechaAsistencia(f.properties); if (!fecha) return false; if (fechas.desde && fecha < fechas.desde) return false; if (fechas.hasta && fecha > fechas.hasta) return false; return true; }); }
+
+        const porTecnico = {};
+        asist.forEach(f => {
+          const nombre = f.properties.tecnico_ma || "Sin nombre";
+          porTecnico[nombre] = (porTecnico[nombre] || 0) + 1;
+        });
+
+        const lista = Object.entries(porTecnico)
+          .map(([nombre, count]) => ({ nombre, count }))
+          .sort((a, b) => esMayor ? b.count - a.count : a.count - b.count);
+
+        if (!lista.length) return "No se encontraron asistencias.";
+
+        const mejor = lista[0];
+        respuestas.push(`<strong>Técnico con ${esMayor ? "mayor" : "menor"} número de asistencias:</strong>`);
+        respuestas.push("<ul>");
+        respuestas.push(`<li><strong>${mejor.nombre}</strong>: ${mejor.count} asistencias</li>`);
+        if (lista.length > 1) {
+          respuestas.push("<li><em>Top 5:</em></li>");
+          lista.slice(0, 5).forEach((t, i) => {
+            respuestas.push(`<li>${i + 1}. ${t.nombre}: ${t.count}</li>`);
+          });
+        }
+        respuestas.push("</ul>");
+        return respuestas.join("");
+      }
+
+      if (esRural) {
+        let asist = featuresPorCapa["asistencias"] || [];
+        const porTecnico = {};
+        asist.forEach(f => {
+          const nombre = f.properties.tecnico_ma || "Sin nombre";
+          const clas = String(f.properties.clas || "").toLowerCase();
+          if (!porTecnico[nombre]) porTecnico[nombre] = { rural: 0, urbano: 0 };
+          if (clas.includes("rural")) porTecnico[nombre].rural++;
+          if (clas.includes("urban")) porTecnico[nombre].urbano++;
+        });
+        const lista = Object.entries(porTecnico)
+          .map(([nombre, v]) => ({ nombre, rural: v.rural, urbano: v.urbano }))
+          .sort((a, b) => esMayor ? b.rural - a.rural : a.rural - b.rural);
+
+        if (!lista.length) return "No se encontraron asistencias.";
+        const mejor = lista[0];
+        respuestas.push(`<strong>Técnico con ${esMayor ? "mayor" : "menor"} asistencias en zona rural:</strong>`);
+        respuestas.push(`<ul><li><strong>${mejor.nombre}</strong>: ${mejor.rural} rural / ${mejor.urbano} urbana</li>`);
+        lista.slice(0, 5).forEach((t, i) => { respuestas.push(`<li>${i + 1}. ${t.nombre}: ${t.rural} rural</li>`); });
+        respuestas.push("</ul>");
+        return respuestas.join("");
+      }
+
+      // Si no especificó campo, dar tiempo (el más común)
+      let rutas = featuresPorCapa["rutas"] || [];
+      if (!rutas.length) return "No hay datos de rutas.";
+      const porTecnico = {};
+      rutas.forEach(f => {
+        const id = String(f.properties.id_tec || "");
+        const nombre = f.properties.tecnico_ma || id;
+        if (!id) return;
+        if (!porTecnico[id]) porTecnico[id] = { nombre, total: 0, count: 0 };
+        porTecnico[id].total += parseFloat(f.properties.tiempo_min) || 0;
+        porTecnico[id].count++;
+      });
+      const lista = Object.values(porTecnico)
+        .map(t => ({ ...t, promedio: t.total / t.count }))
+        .sort((a, b) => esMayor ? b.promedio - a.promedio : a.promedio - b.promedio);
+      if (!lista.length) return "No se encontraron datos.";
+      const mejor = lista[0];
+      respuestas.push(`<strong>Técnico con ${esMayor ? "mayor" : "menor"} tiempo de traslado:</strong>`);
+      respuestas.push("<ul>");
+      lista.slice(0, 5).forEach((t, i) => {
+        respuestas.push(`<li>${i + 1}. <strong>${t.nombre}</strong>: ${t.promedio.toFixed(1)} min (${t.count} ruta(s))</li>`);
+      });
+      respuestas.push("</ul>");
+      return respuestas.join("");
+    }
+
     // Si solo menciona un técnico sin tema específico → resumen de ese técnico
     if (!tipo && tecnico) {
       const asist = (featuresPorCapa["asistencias"] || []).filter(f => String(f.properties.id_tec) === buscarIdTecnico(tecnico));
