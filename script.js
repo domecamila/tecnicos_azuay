@@ -383,13 +383,9 @@ async function descargarCapa(capa) {
   let todas = [];
 
   while (true) {
-    const resp = await fetch(`${SUPABASE_URL}${capa.vista}?select=*`, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        Range: `${offset}-${offset + PAGE_SIZE - 1}`,
-        Prefer: "count=exact",
-      }
+    const url = `${SUPABASE_URL}${capa.vista}?select=*&offset=${offset}&limit=${PAGE_SIZE}`;
+    const resp = await fetch(url, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
     });
     if (!resp.ok) throw new Error(`${capa.vista}: ${resp.status}`);
     const filas = await resp.json();
