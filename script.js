@@ -22,6 +22,15 @@ mapa.createPane("pane-polygon").style.zIndex = 200;
 mapa.createPane("pane-line").style.zIndex = 300;
 mapa.createPane("pane-point").style.zIndex = 400;
 
+L.control.measure({
+  position: "topleft",
+  primaryLengthUnit: "kilometers",
+  secondaryLengthUnit: "meters",
+  primaryAreaUnit: "sqmeters",
+  activeColor: "#C1892F",
+  completedColor: "#2F4B3C",
+}).addTo(mapa);
+
 // Varias opciones de mapa base para elegir
 const baseCalles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap", maxZoom: 19
