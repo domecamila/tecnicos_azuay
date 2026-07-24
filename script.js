@@ -29,6 +29,7 @@ L.control.measure({
   primaryAreaUnit: "sqmeters",
   activeColor: "#C1892F",
   completedColor: "#2F4B3C",
+  captureZindex: 99999,
 }).addTo(mapa);
 
 // Varias opciones de mapa base para elegir
