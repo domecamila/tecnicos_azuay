@@ -104,6 +104,30 @@
 
   </div>
 
+<div class="chat-panel" id="chat-panel">
+  <button class="chat-toggle" id="chat-toggle" title="Asistente de consultas">💬</button>
+  <div class="chat-window" id="chat-window">
+    <div class="chat-header">
+      <span>Asistente de consultas</span>
+      <button class="chat-close" id="chat-close" title="Cerrar">✕</button>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-msg chat-bot">Hola, soy tu asistente. Puedo ayudarte con consultas sobre los datos del geoportal. Ejemplos:<br><br>
+        • <i>¿Cuántas asistencias hay?</i><br>
+        • <i>¿Cuántos técnicos hay en Cuenca?</i><br>
+        • <i>¿Dónde vive Juan Pérez?</i><br>
+        • <i>Resumen general</i><br>
+        • <i>Muestra la capa de asistencias</i><br>
+        • <i>Ve a Cuenca</i>
+      </div>
+    </div>
+    <form class="chat-input" id="chat-form">
+      <input type="text" id="chat-input" placeholder="Escribe tu consulta..." autocomplete="off">
+      <button type="submit" title="Enviar">➤</button>
+    </form>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="config.js"></script>
 <script src="script.js"></script>

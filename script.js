@@ -530,3 +530,542 @@ document.getElementById("btn-limpiar-filtros").addEventListener("click", () => {
 });
 
 iniciar();
+
+// =====================================================================
+// ASISTENTE DE CONSULTAS — Motor de reglas en español (sin API externa)
+// =====================================================================
+
+const ChatAsistente = (() => {
+  const chatToggle = document.getElementById("chat-toggle");
+  const chatWindow = document.getElementById("chat-window");
+  const chatClose = document.getElementById("chat-close");
+  const chatForm = document.getElementById("chat-form");
+  const chatInput = document.getElementById("chat-input");
+  const chatMessages = document.getElementById("chat-messages");
+
+  chatToggle.addEventListener("click", () => chatWindow.classList.toggle("open"));
+  chatClose.addEventListener("click", () => chatWindow.classList.remove("open"));
+  chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const texto = chatInput.value.trim();
+    if (!texto) return;
+    agregarMensaje(texto, "user");
+    chatInput.value = "";
+    setTimeout(() => {
+      const respuesta = procesar(texto);
+      agregarMensaje(respuesta, "bot");
+    }, 150);
+  });
+
+  function agregarMensaje(html, tipo) {
+    const div = document.createElement("div");
+    div.className = `chat-msg chat-${tipo}`;
+    div.innerHTML = html;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  // Normaliza texto: quita tildes, minúsculas, recorta
+  function norm(s) {
+    return String(s || "").toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  // Verifica si el texto contiene alguna de las palabras clave
+  function contiene(texto, ...palabras) {
+    const t = norm(texto);
+    return palabras.some(p => t.includes(norm(p)));
+  }
+
+  // Extrae un valor entre palabras clave (ej: "en Cuenca" → "Cuenca")
+  function extraerValor(texto, ...claves) {
+    const t = norm(texto);
+    for (const clave of claves) {
+      const idx = t.indexOf(norm(clave));
+      if (idx === -1) continue;
+      let resto = t.slice(idx + norm(clave).length).trim();
+      // Quitar palabras comunes de cierre
+      resto = resto.replace(/\s*(y|e|o|de|del|las?|los?|un|una|que|en|por|para|con|el|la)\s*$/i, "").trim();
+      if (resto.length > 0) return resto;
+    }
+    return null;
+  }
+
+  // Lista de cantones de Azuay conocidos
+  const CANTONES_AZUAY = [
+    "cuenca", "paute", "gualaceo", "sevilla de oro", "camilo ponce enriquez",
+    "el tambo", "daniel leonidas ordonez", "guaranda", "miguel ribast gauss",
+    "lausaca", "lufa", "san fernando", "santa isabel", "sigsig", "onioc",
+    "pacifico", "suscal", "bibián", "el pan", "chiscán"
+  ];
+
+  // Busca si el texto menciona algún cantón conocido
+  function buscarCanton(texto) {
+    const t = norm(texto);
+    for (const c of CANTONES_AZUAY) {
+      if (t.includes(norm(c))) return c;
+    }
+    return null;
+  }
+
+  // Busca si el texto menciona un nombre de técnico conocido
+  function buscarTecnico(texto) {
+    const t = norm(texto);
+    const tecnicos = featuresPorCapa["poligonos_asistencias"] || featuresPorCapa["asistencias"] || [];
+    const nombres = new Map();
+    tecnicos.forEach(f => {
+      const p = f.properties;
+      if (p.tecnico_ma) nombres.set(norm(p.tecnico_ma), p.tecnico_ma);
+      if (p.id_tec) nombres.set(norm(String(p.id_tec)), p.tecnico_ma || String(p.id_tec));
+    });
+    // Buscar coincidencia más larga primero
+    let mejor = null;
+    let mejorLen = 0;
+    for (const [normN, real] of nombres) {
+      if (t.includes(normN) && normN.length > mejorLen) {
+        mejor = real;
+        mejorLen = normN.length;
+      }
+    }
+    return mejor;
+  }
+
+  // Busca si el texto menciona una cédula (número de 10 dígitos)
+  function buscarCedula(texto) {
+    const m = texto.match(/\b\d{10}\b/);
+    return m ? m[0] : null;
+  }
+
+  // Lista de capas conocidas (id -> nombre amigable)
+  const CAPAS_NOMBRES = {
+    asistencias: "asistencias",
+    domicilios: "domicilios",
+    distrital: "dirección distrital",
+    rutas: "rutas",
+    poligonos_asistencias: "polígonos de asistencias",
+    area_distribucion: "área de distribución",
+    buffer500: "buffer 500 m",
+    buffer1000: "buffer 1000 m",
+    buffer5000: "buffer 5000 m",
+  };
+
+  function buscarCapa(texto) {
+    const t = norm(texto);
+    for (const [id, nombre] of Object.entries(CAPAS_NOMBRES)) {
+      if (t.includes(norm(nombre)) || t.includes(norm(id))) return id;
+    }
+    return null;
+  }
+
+  // ==================== ACCIONES ====================
+
+  function accionResumenGeneral() {
+    const asist = featuresPorCapa["asistencias"] || [];
+    const dom = featuresPorCapa["domicilios"] || [];
+    const poli = featuresPorCapa["poligonos_asistencias"] || [];
+    const areas = featuresPorCapa["area_distribucion"] || [];
+    const rutas = featuresPorCapa["rutas"] || [];
+
+    let rural = 0, urbano = 0;
+    asist.forEach(f => {
+      const c = String(f.properties.clas || "").toLowerCase();
+      if (c.includes("rural")) rural++;
+      if (c.includes("urban")) urbano++;
+    });
+
+    const tecnicos = new Set();
+    [...poli, ...areas].forEach(f => {
+      if (f.properties.id_tec) tecnicos.add(String(f.properties.id_tec));
+    });
+
+    const cantones = new Set();
+    asist.forEach(f => {
+      if (f.properties.nombre_can) cantones.add(f.properties.nombre_can);
+    });
+
+    return `<b>Resumen general del geoportal:</b><br><br>` +
+      `• <b>${asist.length}</b> asistencias técnicas registradas<br>` +
+      `• <b>${dom.length}</b> domicilios de técnicos<br>` +
+      `• <b>${tecnicos.size}</b> técnicos en territorial<br>` +
+      `• <b>${cantones.size}</b> cantones con asistencias<br>` +
+      `• <b>${areas.length}</b> polígonos de área de distribución<br>` +
+      `• <b>${rutas.length}</b> rutas de movilización<br><br>` +
+      `Asistencias por zona: rural <b>${rural}</b> · urbana <b>${urbano}</b>`;
+  }
+
+  function accionContarAsistencias(canton, tecnico) {
+    let features = featuresPorCapa["asistencias"] || [];
+    let total = features.length;
+    let filtros = [];
+
+    if (canton) {
+      features = features.filter(f => norm(f.properties.nombre_can).includes(norm(canton)));
+      filtros.push(`cantón "${canton}"`);
+    }
+    if (tecnico) {
+      features = features.filter(f => norm(f.properties.tecnico_ma).includes(norm(tecnico)));
+      filtros.push(`técnico "${tecnico}"`);
+    }
+
+    const texto = filtros.length ? ` en ${filtros.join(" y ")}` : "";
+    return `Hay <b>${features.length}</b> asistencias${texto} de un total de ${total}.`;
+  }
+
+  function accionBuscarDomicilio(nombre) {
+    const dom = featuresPorCapa["domicilios"] || [];
+    const resultados = dom.filter(f => {
+      const p = f.properties;
+      return norm(p.a2_nombres).includes(norm(nombre)) ||
+             norm(String(p.a1__númer)).includes(norm(nombre));
+    });
+
+    if (!resultados.length) return `No encontré domicilios para "<b>${nombre}</b>".`;
+
+    let resp = `Encontré <b>${resultados.length}</b> resultado(s):<br><br>`;
+    resultados.slice(0, 5).forEach(f => {
+      const p = f.properties;
+      resp += `• <b>${p.a2_nombres || "?"}</b> — Cédula: ${p.a1__númer || "?"}<br>`;
+      resp += `  ${p.b2__cantó || "?"}, ${p.b3__parroq || "?"}<br>`;
+      resp += `  ${p.b4__calle_ || ""} ${p.b5__númer || ""} y ${p.b6__calle_ || ""}<br><br>`;
+    });
+    if (resultados.length > 5) resp += `<i>...y ${resultados.length - 5} resultado(s) más.</i>`;
+    return resp;
+  }
+
+  function accionBuscarAsistencias(nombre) {
+    const asist = featuresPorCapa["asistencias"] || [];
+    const resultados = asist.filter(f => {
+      const p = f.properties;
+      return norm(p.tecnico_ma).includes(norm(nombre)) ||
+             norm(p.cedula_pro).includes(norm(nombre));
+    });
+
+    if (!resultados.length) return `No encontré asistencias para "<b>${nombre}</b>".`;
+
+    let resp = `Encontré <b>${resultados.length}</b> asistencia(s) para "<b>${nombre}</b>":<br><br>`;
+
+    // Agrupar por cantón
+    const porCanton = {};
+    resultados.forEach(f => {
+      const c = f.properties.nombre_can || "Sin cantón";
+      porCanton[c] = (porCanton[c] || 0) + 1;
+    });
+    Object.entries(porCanton).sort((a, b) => b[1] - a[1]).forEach(([c, n]) => {
+      resp += `• ${c}: <b>${n}</b><br>`;
+    });
+
+    return resp;
+  }
+
+  function accionEstadisticas() {
+    const asist = featuresPorCapa["asistencias"] || [];
+    let rural = 0, urbano = 0, d500 = 0, d1000 = 0, d5000 = 0, fuera5000 = 0;
+
+    asist.forEach(f => {
+      const p = f.properties;
+      const c = String(p.clas || "").toLowerCase();
+      if (c.includes("rural")) rural++;
+      if (c.includes("urban")) urbano++;
+      if (esVerdadero(p.buffer_500)) d500++;
+      if (esVerdadero(p.buffer_100)) d1000++;
+      if (esVerdadero(p.buffer_501)) d5000++; else fuera5000++;
+    });
+
+    const rutas = featuresPorCapa["rutas"] || [];
+    let promTiempo = 0, promDist = 0;
+    if (rutas.length) {
+      promTiempo = rutas.reduce((s, f) => s + (parseFloat(f.properties.tiempo_min) || 0), 0) / rutas.length;
+      promDist = rutas.reduce((s, f) => s + (parseFloat(f.properties.dist_km) || 0), 0) / rutas.length;
+    }
+
+    return `<b>Estadísticas de asistencias técnicas:</b><br><br>` +
+      `Total: <b>${asist.length}</b><br>` +
+      `Rural: <b>${rural}</b> (${(rural / asist.length * 100).toFixed(1)}%)<br>` +
+      `Urbana: <b>${urbano}</b> (${(urbano / asist.length * 100).toFixed(1)}%)<br><br>` +
+      `<b>Por distancia al domicilio:</b><br>` +
+      `• ≤ 500 m: <b>${d500}</b><br>` +
+      `• ≤ 1000 m: <b>${d1000}</b><br>` +
+      `• ≤ 5000 m: <b>${d5000}</b><br>` +
+      `• > 5000 m: <b>${fuera5000}</b><br><br>` +
+      `<b>Traslado promedio:</b> ${promTiempo.toFixed(0)} min / ${promDist.toFixed(1)} km`;
+  }
+
+  function accionEstadisticasCanton(canton) {
+    const asist = featuresPorCapa["asistencias"] || [];
+    const filtradas = asist.filter(f => norm(f.properties.nombre_can).includes(norm(canton)));
+
+    if (!filtradas.length) return `No hay asistencias en el cantón "<b>${canton}</b>".`;
+
+    let rural = 0, urbano = 0;
+    const tecnicos = new Set();
+    const parroquias = new Set();
+    filtradas.forEach(f => {
+      const p = f.properties;
+      const c = String(p.clas || "").toLowerCase();
+      if (c.includes("rural")) rural++;
+      if (c.includes("urban")) urbano++;
+      if (p.tecnico_ma) tecnicos.add(p.tecnico_ma);
+      if (p.nombre_par) parroquias.add(p.nombre_par);
+    });
+
+    return `<b>Estadísticas para ${canton}:</b><br><br>` +
+      `• Asistencias: <b>${filtradas.length}</b><br>` +
+      `• Rural: <b>${rural}</b> · Urbana: <b>${urbano}</b><br>` +
+      `• Técnicos con asistencias: <b>${tecnicos.size}</b><br>` +
+      `• Parroquias: <b>${parroquias.size}</b> (${[...parroquias].join(", ")})`;
+  }
+
+  function accionListarTecnicos() {
+    const poli = featuresPorCapa["poligonos_asistencias"] || [];
+    const mapa = new Map();
+    poli.forEach(f => {
+      const p = f.properties;
+      if (p.tecnico_ma && !mapa.has(p.tecnico_ma)) {
+        mapa.set(p.tecnico_ma, p.cedula_tec || "");
+      }
+    });
+    const lista = [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"));
+
+    if (!lista.length) return "No hay técnicos registrados.";
+
+    let resp = `<b>Técnicos en territorial (${lista.length}):</b><br><br>`;
+    lista.forEach(([nombre, cedula], i) => {
+      resp += `${i + 1}. ${nombre} — CC: ${cedula || "?"}<br>`;
+    });
+    return resp;
+  }
+
+  function accionMostrarCapa(capaId) {
+    const checkbox = document.querySelector(`input[data-layer="${capaId}"]`);
+    if (!checkbox) return `No encontré la capa "${capaId}".`;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event("change"));
+    return `Capa "<b>${CAPAS_NOMBRES[capaId] || capaId}</b>" activada en el mapa.`;
+  }
+
+  function accionOcultarCapa(capaId) {
+    const checkbox = document.querySelector(`input[data-layer="${capaId}"]`);
+    if (!checkbox) return `No encontré la capa "${capaId}".`;
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event("change"));
+    return `Capa "<b>${CAPAS_NOMBRES[capaId] || capaId}</b>" ocultada.`;
+  }
+
+  function accionMostrarTodas() {
+    document.querySelectorAll(".layer-item input").forEach(input => {
+      input.checked = true;
+      input.dispatchEvent(new Event("change"));
+    });
+    return "Todas las capas activadas.";
+  }
+
+  function accionOcultarTodas() {
+    document.querySelectorAll(".layer-item input").forEach(input => {
+      input.checked = false;
+      input.dispatchEvent(new Event("change"));
+    });
+    return "Todas las capas ocultadas.";
+  }
+
+  function accionIrA(canton) {
+    // Buscar features que mencionen el cantón para centrar el mapa
+    const todas = [
+      ...(featuresPorCapa["asistencias"] || []),
+      ...(featuresPorCapa["domicilios"] || []),
+      ...(featuresPorCapa["area_distribucion"] || []),
+    ];
+
+    const matches = todas.filter(f => {
+      const p = f.properties;
+      return norm(p.nombre_can || p.b2__cantó || "").includes(norm(canton));
+    });
+
+    if (matches.length) {
+      // Calcular bounds
+      const coords = [];
+      matches.forEach(f => {
+        if (f.geometry.type === "Point") {
+          coords.push([f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+        } else if (f.geometry.type === "Polygon") {
+          f.geometry.coordinates[0].forEach(c => coords.push([c[1], c[0]]));
+        } else if (f.geometry.type === "MultiPolygon") {
+          f.geometry.coordinates.forEach(poly => poly[0].forEach(c => coords.push([c[1], c[0]])));
+        }
+      });
+      if (coords.length) {
+        mapa.fitBounds(L.latLngBounds(coords).pad(0.2));
+      }
+    }
+    return `Moviendo el mapa a "<b>${canton}</b>"...`;
+  }
+
+  function accionListarCantones() {
+    const asist = featuresPorCapa["asistencias"] || [];
+    const porCanton = {};
+    asist.forEach(f => {
+      const c = f.properties.nombre_can || "Desconocido";
+      porCanton[c] = (porCanton[c] || 0) + 1;
+    });
+    const lista = Object.entries(porCanton).sort((a, b) => b[1] - a[1]);
+
+    let resp = `<b>Cantones con asistencias (${lista.length}):</b><br><br>`;
+    lista.forEach(([c, n]) => {
+      resp += `• ${c}: <b>${n}</b> asistencias<br>`;
+    });
+    return resp;
+  }
+
+  function accionRubros() {
+    const asist = featuresPorCapa["asistencias"] || [];
+    const porRubro = {};
+    asist.forEach(f => {
+      const r = f.properties.rubro_ava || "Sin especificar";
+      porRubro[r] = (porRubro[r] || 0) + 1;
+    });
+    const lista = Object.entries(porRubro).sort((a, b) => b[1] - a[1]);
+
+    let resp = `<b>Asistencias por rubro:</b><br><br>`;
+    lista.forEach(([r, n]) => {
+      resp += `• ${r}: <b>${n}</b><br>`;
+    });
+    return resp;
+  }
+
+  function accionTiposVisita() {
+    const asist = featuresPorCapa["asistencias"] || [];
+    const porTipo = {};
+    asist.forEach(f => {
+      const t = f.properties.tipo_vis || "Sin especificar";
+      porTipo[t] = (porTipo[t] || 0) + 1;
+    });
+    const lista = Object.entries(porTipo).sort((a, b) => b[1] - a[1]);
+
+    let resp = `<b>Asistencias por tipo de visita:</b><br><br>`;
+    lista.forEach(([t, n]) => {
+      resp += `• ${t}: <b>${n}</b><br>`;
+    });
+    return resp;
+  }
+
+  function accionAyuda() {
+    return `<b>¿Cómo puedo ayudarte?</b><br><br>` +
+      `<b>Consultas de datos:</b><br>` +
+      `• ¿Cuántas asistencias hay en [cantón]?<br>` +
+      `• ¿Cuántos técnicos hay?<br>` +
+      `• ¿Dónde vive [nombre]?<br>` +
+      `• ¿Cuántas asistencias tiene [técnico]?<br>` +
+      `• Busca cédula [número]<br><br>` +
+      `<b>Estadísticas:</b><br>` +
+      `• Resumen general<br>` +
+      `• Estadísticas de [cantón]<br>` +
+      `• ¿Qué rubros hay?<br>` +
+      `• Tipos de visita<br>` +
+      `• Lista de cantones<br>` +
+      `• Lista de técnicos<br><br>` +
+      `<b>Navegación del mapa:</b><br>` +
+      `• Muestra la capa de [nombre]<br>` +
+      `• Oculta la capa de [nombre]<br>` +
+      `• Muestra todas / Oculta todas<br>` +
+      `• Ve a [cantón]`;
+  }
+
+  // ==================== PROCESADOR PRINCIPAL ====================
+
+  function procesar(texto) {
+    const t = norm(texto);
+
+    // Ayuda
+    if (contiene(t, "ayuda", "help", "qué puedes", "que puedes", "comandos", "opciones")) {
+      return accionAyuda();
+    }
+
+    // Resumen general
+    if (contiene(t, "resumen general", "resumir todo", "resumen de todo", "todo el geoportal")) {
+      return accionResumenGeneral();
+    }
+
+    // Estadísticas generales
+    if (contiene(t, "estadísticas", "estadisticas", "porcentaje", "proporción")) {
+      const canton = buscarCanton(t);
+      if (canton) return accionEstadisticasCanton(canton);
+      return accionEstadisticas();
+    }
+
+    // Rubros
+    if (contiene(t, "rubro", "rubros", "ava")) {
+      return accionRubros();
+    }
+
+    // Tipos de visita
+    if (contiene(t, "tipo de visita", "tipos de visita", "visitas por tipo")) {
+      return accionTiposVisita();
+    }
+
+    // Lista de cantones
+    if (contiene(t, "lista de cantones", "cuáles cantones", "cuales cantones", "qué cantones")) {
+      return accionListarCantones();
+    }
+
+    // Lista de técnicos
+    if (contiene(t, "lista de técnicos", "lista de tecnicos", "cuáles técnicos", "cuales tecnicos", "qué técnicos")) {
+      return accionListarTecnicos();
+    }
+
+    // Contar asistencias
+    if (contiene(t, "cuántas asistencias", "cuantas asistencias", "cuánto", "cuanto", "total de asistencias", "número de asistencias")) {
+      const canton = buscarCanton(t);
+      const tecnico = buscarTecnico(t);
+      return accionContarAsistencias(canton, tecnico);
+    }
+
+    // Buscar por cédula
+    if (contiene(t, "cédula", "cedula")) {
+      const cedula = buscarCedula(t);
+      if (cedula) {
+        return accionBuscarDomicilio(cedula);
+      }
+    }
+
+    // Buscar domicilio de técnico
+    if (contiene(t, "dónde vive", "donde vive", "domicilio de", "dirección de", "direccion de")) {
+      const nombre = extraerValor(t, "dónde vive", "donde vive", "domicilio de", "dirección de", "direccion de");
+      if (nombre) return accionBuscarDomicilio(nombre);
+    }
+
+    // Buscar asistencias de técnico
+    if (contiene(t, "asistencias de", "asistencias del", "asistencias tiene")) {
+      const nombre = extraerValor(t, "asistencias de", "asistencias del", "asistencias tiene");
+      if (nombre) return accionBuscarAsistencias(nombre);
+    }
+
+    // Mostrar/ocultar capa
+    if (contiene(t, "mostrar capa", "activar capa", "muestra la capa", "activa la capa", "encender")) {
+      const capa = buscarCapa(t);
+      if (capa) return accionMostrarCapa(capa);
+      if (contiene(t, "todas las capas", "todas")) return accionMostrarTodas();
+    }
+    if (contiene(t, "ocultar capa", "apagar capa", "oculta la capa", "desactiva la capa")) {
+      const capa = buscarCapa(t);
+      if (capa) return accionOcultarCapa(capa);
+      if (contiene(t, "todas las capas", "todas")) return accionOcultarTodas();
+    }
+
+    // Ir a cantón
+    if (contiene(t, "ve a", "ir a", "centra en", "centrar en", "muéstrame", "muestrame")) {
+      const canton = buscarCanton(t);
+      if (canton) return accionIrA(canton);
+    }
+
+    // Buscar técnico por nombre directo (si no matcheó antes)
+    const tec = buscarTecnico(t);
+    if (tec && t.length > 3) {
+      return accionBuscarAsistencias(tec);
+    }
+
+    // Si nada matcheó
+    return `No entendí tu consulta. Escribe <b>"ayuda"</b> para ver las opciones disponibles.`;
+  }
+
+  return { procesar };
+})();
