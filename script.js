@@ -735,6 +735,21 @@ iniciar();
       const esAsistencias = norm.includes("asistencia");
       const esRural = norm.includes("rural");
 
+      // Mapa id_tec → nombre (de asistencias y domicilios)
+      const nombrePorId = {};
+      (featuresPorCapa["asistencias"] || []).concat(featuresPorCapa["domicilios"] || []).forEach(f => {
+        const id = String(f.properties.id_tec || "");
+        const nombre = f.properties.tecnico_ma || f.properties.a2_nombres;
+        if (id && nombre && !nombrePorId[id]) nombrePorId[id] = nombre;
+      });
+      const nombreDe = (id, fallback) => nombrePorId[String(id)] || fallback || String(id);
+
+      // ¿Qué campo? tiempo, distancia, asistencias
+      const esTiempo = norm.includes("tiempo") || norm.includes("minuto") || norm.includes("min");
+      const esDistancia = norm.includes("distancia") || norm.includes("km") || norm.includes("kilometro");
+      const esAsistencias = norm.includes("asistencia");
+      const esRural = norm.includes("rural");
+
       if (esTiempo || esDistancia) {
         // Buscar en rutas el técnico con mayor/menor tiempo o distancia
         let rutas = featuresPorCapa["rutas"] || [];
@@ -747,7 +762,7 @@ iniciar();
         const porTecnico = {};
         rutas.forEach(f => {
           const id = String(f.properties.id_tec || "");
-          const nombre = f.properties.tecnico_ma || id;
+          const nombre = nombreDe(id, f.properties.tecnico_ma);
           if (!id) return;
           if (!porTecnico[id]) porTecnico[id] = { nombre, total: 0, count: 0 };
           porTecnico[id].total += parseFloat(f.properties[campo]) || 0;
@@ -782,7 +797,7 @@ iniciar();
 
         const porTecnico = {};
         asist.forEach(f => {
-          const nombre = f.properties.tecnico_ma || "Sin nombre";
+          const nombre = nombreDe(f.properties.id_tec, f.properties.tecnico_ma);
           porTecnico[nombre] = (porTecnico[nombre] || 0) + 1;
         });
 
@@ -810,7 +825,7 @@ iniciar();
         let asist = featuresPorCapa["asistencias"] || [];
         const porTecnico = {};
         asist.forEach(f => {
-          const nombre = f.properties.tecnico_ma || "Sin nombre";
+          const nombre = nombreDe(f.properties.id_tec, f.properties.tecnico_ma);
           const clas = String(f.properties.clas || "").toLowerCase();
           if (!porTecnico[nombre]) porTecnico[nombre] = { rural: 0, urbano: 0 };
           if (clas.includes("rural")) porTecnico[nombre].rural++;
@@ -835,7 +850,7 @@ iniciar();
       const porTecnico = {};
       rutas.forEach(f => {
         const id = String(f.properties.id_tec || "");
-        const nombre = f.properties.tecnico_ma || id;
+        const nombre = nombreDe(id, f.properties.tecnico_ma);
         if (!id) return;
         if (!porTecnico[id]) porTecnico[id] = { nombre, total: 0, count: 0 };
         porTecnico[id].total += parseFloat(f.properties.tiempo_min) || 0;
