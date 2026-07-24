@@ -342,3 +342,19 @@ html, body {
   height: 34px !important;
 }
 .leaflet-control-layers label { font-size: 12.5px; margin-bottom: 3px; }
+
+/* Herramienta de medición */
+.leaflet-control-medir button {
+  width: 34px; height: 34px; font-size: 18px;
+  cursor: pointer; border: none; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.leaflet-control-medir button:hover { background: #f4f4f4; }
+.medir-tooltip {
+  background: rgba(193, 137, 47, 0.92) !important;
+  color: #fff !important; border: none !important;
+  border-radius: 4px !important; font-weight: 600;
+  font-family: var(--font-body);
+}
+.medir-tooltip::before { border-top-color: rgba(193, 137, 47, 0.92) !important; }
+.medir-popup .leaflet-popup-content { font-family: var(--font-body); font-size: 13px; }

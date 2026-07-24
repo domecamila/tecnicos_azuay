@@ -22,15 +22,104 @@ mapa.createPane("pane-polygon").style.zIndex = 200;
 mapa.createPane("pane-line").style.zIndex = 300;
 mapa.createPane("pane-point").style.zIndex = 400;
 
-L.control.measure({
-  position: "topleft",
-  primaryLengthUnit: "kilometers",
-  secondaryLengthUnit: "meters",
-  primaryAreaUnit: "sqmeters",
-  activeColor: "#C1892F",
-  completedColor: "#2F4B3C",
-  captureZindex: 99999,
-}).addTo(mapa);
+// Herramienta de medición custom
+const MedirControl = L.Control.extend({
+  options: { position: "topleft" },
+  onAdd() {
+    const container = L.DomUtil.create("div", "leaflet-bar leaflet-control-medir");
+    container.innerHTML = `<button id="btn-medir" title="Medir distancia">📏</button>`;
+    L.DomEvent.disableClickPropagation(container);
+    this._activo = false;
+    this._puntos = [];
+    this._linea = null;
+    this._marcadores = [];
+    this._tooltip = null;
+
+    container.querySelector("button").addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._toggle();
+    });
+    return container;
+  },
+  _toggle() {
+    this._activo = !this._activo;
+    const btn = document.getElementById("btn-medir");
+    if (this._activo) {
+      btn.style.background = "#C1892F";
+      btn.style.color = "#fff";
+      mapa.getContainer().style.cursor = "crosshair";
+      this._onClickFn = (e) => this._agregarPunto(e.latlng);
+      this._onDblClickFn = (e) => { L.DomEvent.stop(e); this._finalizar(); };
+      mapa.on("click", this._onClickFn);
+      mapa.on("dblclick", this._onDblClickFn);
+    } else {
+      this._limpiar();
+      btn.style.background = "";
+      btn.style.color = "";
+      mapa.getContainer().style.cursor = "";
+      mapa.off("click", this._onClickFn);
+      mapa.off("dblclick", this._onDblClickFn);
+    }
+  },
+  _agregarPunto(latlng) {
+    this._puntos.push(latlng);
+    const icon = L.divIcon({
+      html: '<div style="width:10px;height:10px;background:#C1892F;border:2px solid #fff;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.5)"></div>',
+      className: "",
+      iconSize: [10, 10],
+      iconAnchor: [5, 5],
+    });
+    const m = L.marker(latlng, { icon, pane: "markerPane" }).addTo(mapa);
+    this._marcadores.push(m);
+
+    if (this._puntos.length > 1) {
+      if (this._linea) mapa.removeLayer(this._linea);
+      this._linea = L.polyline(this._puntos, {
+        color: "#C1892F", weight: 3, dashArray: "6 4", pane: "pane-line"
+      }).addTo(mapa);
+    }
+
+    if (this._tooltip) this._tooltip.remove();
+    if (this._puntos.length >= 2) {
+      const dist = this._distanciaTotal();
+      const texto = dist >= 1000
+        ? `${(dist / 1000).toFixed(2)} km`
+        : `${dist.toFixed(0)} m`;
+      this._tooltip = L.tooltip({ permanent: true, direction: "top", className: "medir-tooltip" })
+        .setLatLng(latlng)
+        .setContent(`📏 ${texto}`)
+        .addTo(mapa);
+    }
+  },
+  _distanciaTotal() {
+    let total = 0;
+    for (let i = 1; i < this._puntos.length; i++) {
+      total += this._puntos[i].distanceTo(this._puntos[i - 1]);
+    }
+    return total;
+  },
+  _finalizar() {
+    if (this._puntos.length < 2) return;
+    const dist = this._distanciaTotal();
+    const texto = dist >= 1000
+      ? `Distancia total: ${(dist / 1000).toFixed(2)} km`
+      : `Distancia total: ${dist.toFixed(0)} m`;
+    if (this._tooltip) this._tooltip.remove();
+    L.popup({ className: "medir-popup" })
+      .setLatLng(this._puntos[this._puntos.length - 1])
+      .setContent(`📏 <b>${texto}</b><br><small>Doble clic para nueva medición</small>`)
+      .openOn(mapa);
+  },
+  _limpiar() {
+    this._puntos = [];
+    this._marcadores.forEach(m => mapa.removeLayer(m));
+    this._marcadores = [];
+    if (this._linea) { mapa.removeLayer(this._linea); this._linea = null; }
+    if (this._tooltip) { this._tooltip.remove(); this._tooltip = null; }
+    mapa.closePopup();
+  }
+});
+new MedirControl().addTo(mapa);
 
 // Varias opciones de mapa base para elegir
 const baseCalles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
