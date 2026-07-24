@@ -948,6 +948,115 @@ const ChatAsistente = (() => {
     return resp;
   }
 
+  function accionRankingTraslado() {
+    const rutas = featuresPorCapa["rutas"] || [];
+    if (!rutas.length) return "No hay datos de rutas de traslado.";
+
+    const mapaTec = new Map();
+    rutas.forEach(f => {
+      const p = f.properties;
+      const id = String(p.id_tec || "");
+      if (!id) return;
+      const tiempo = parseFloat(p.tiempo_min) || 0;
+      const dist = parseFloat(p.dist_km) || 0;
+      mapaTec.set(id, { tiempo, dist, nombre: p.tecnico_ma || id });
+    });
+
+    const lista = [...mapaTec.values()].sort((a, b) => b.tiempo - a.tiempo);
+    const top = lista.slice(0, 5);
+
+    let resp = `<b>Ranking de traslado — mayor a menor tiempo:</b><br><br>`;
+    top.forEach((t, i) => {
+      resp += `${i + 1}. <b>${t.nombre}</b> — ${t.tiempo.toFixed(0)} min / ${t.dist.toFixed(1)} km<br>`;
+    });
+    resp += `<br><i>Promedio general: ${(lista.reduce((s, x) => s + x.tiempo, 0) / lista.length).toFixed(0)} min / ${(lista.reduce((s, x) => s + x.dist, 0) / lista.length).toFixed(1)} km</i>`;
+    return resp;
+  }
+
+  function accionRankingAsistencias() {
+    const asist = featuresPorCapa["asistencias"] || [];
+    if (!asist.length) return "No hay datos de asistencias.";
+
+    const porTec = {};
+    asist.forEach(f => {
+      const nombre = f.properties.tecnico_ma || "Desconocido";
+      porTec[nombre] = (porTec[nombre] || 0) + 1;
+    });
+
+    const lista = Object.entries(porTec).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    let resp = `<b>Ranking de asistencias — mayor a menor cantidad:</b><br><br>`;
+    lista.forEach(([nombre, n], i) => {
+      resp += `${i + 1}. <b>${nombre}</b>: ${n} asistencias<br>`;
+    });
+    return resp;
+  }
+
+  function accionRankingCantones() {
+    const asist = featuresPorCapa["asistencias"] || [];
+    if (!asist.length) return "No hay datos de asistencias.";
+
+    const porCanton = {};
+    asist.forEach(f => {
+      const c = f.properties.nombre_can || "Desconocido";
+      porCanton[c] = (porCanton[c] || 0) + 1;
+    });
+
+    const lista = Object.entries(porCanton).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    let resp = `<b>Ranking de cantones — mayor a menor asistencias:</b><br><br>`;
+    lista.forEach(([c, n], i) => {
+      resp += `${i + 1}. <b>${c}</b>: ${n} asistencias<br>`;
+    });
+    return resp;
+  }
+
+  function accionTecnicoMasDemora() {
+    const rutas = featuresPorCapa["rutas"] || [];
+    if (!rutas.length) return "No hay datos de rutas de traslado.";
+
+    let max = null;
+    rutas.forEach(f => {
+      const p = f.properties;
+      const tiempo = parseFloat(p.tiempo_min) || 0;
+      if (!max || tiempo > max.tiempo) {
+        max = { nombre: p.tecnico_ma || p.id_tec || "?", tiempo, dist: parseFloat(p.dist_km) || 0 };
+      }
+    });
+
+    return `El técnico que más tiempo se demora en trasladarse es <b>${max.nombre}</b> con <b>${max.tiempo.toFixed(0)} minutos</b> (${max.dist.toFixed(1)} km).`;
+  }
+
+  function accionTecnicoMenosDemora() {
+    const rutas = featuresPorCapa["rutas"] || [];
+    if (!rutas.length) return "No hay datos de rutas de traslado.";
+
+    let min = null;
+    rutas.forEach(f => {
+      const p = f.properties;
+      const tiempo = parseFloat(p.tiempo_min) || 0;
+      if (!min || (tiempo > 0 && tiempo < min.tiempo)) {
+        min = { nombre: p.tecnico_ma || p.id_tec || "?", tiempo, dist: parseFloat(p.dist_km) || 0 };
+      }
+    });
+
+    return `El técnico que menos tiempo se demora en trasladarse es <b>${min.nombre}</b> con <b>${min.tiempo.toFixed(0)} minutos</b> (${min.dist.toFixed(1)} km).`;
+  }
+
+  function accionPromedioTraslado() {
+    const rutas = featuresPorCapa["rutas"] || [];
+    if (!rutas.length) return "No hay datos de rutas de traslado.";
+
+    const total = rutas.length;
+    const promTiempo = rutas.reduce((s, f) => s + (parseFloat(f.properties.tiempo_min) || 0), 0) / total;
+    const promDist = rutas.reduce((s, f) => s + (parseFloat(f.properties.dist_km) || 0), 0) / total;
+    const maxT = Math.max(...rutas.map(f => parseFloat(f.properties.tiempo_min) || 0));
+    const minT = Math.min(...rutas.filter(f => parseFloat(f.properties.tiempo_min) > 0).map(f => parseFloat(f.properties.tiempo_min) || Infinity));
+
+    return `<b>Promedios de traslado (${total} técnicos):</b><br><br>` +
+      `• Promedio: <b>${promTiempo.toFixed(0)} min</b> / ${promDist.toFixed(1)} km<br>` +
+      `• Máximo: <b>${maxT.toFixed(0)} min</b><br>` +
+      `• Mínimo: <b>${minT.toFixed(0)} min</b>`;
+  }
+
   function accionAyuda() {
     return `<b>¿Cómo puedo ayudarte?</b><br><br>` +
       `<b>Consultas de datos:</b><br>` +
@@ -956,13 +1065,19 @@ const ChatAsistente = (() => {
       `• ¿Dónde vive [nombre]?<br>` +
       `• ¿Cuántas asistencias tiene [técnico]?<br>` +
       `• Busca cédula [número]<br><br>` +
-      `<b>Estadísticas:</b><br>` +
+      `<b>Estadísticas y rankings:</b><br>` +
       `• Resumen general<br>` +
       `• Estadísticas de [cantón]<br>` +
       `• ¿Qué rubros hay?<br>` +
       `• Tipos de visita<br>` +
       `• Lista de cantones<br>` +
-      `• Lista de técnicos<br><br>` +
+      `• Lista de técnicos<br>` +
+      `• Ranking de asistencias<br>` +
+      `• Ranking de traslados<br><br>` +
+      `<b>Traslados:</b><br>` +
+      `• ¿Quién tarda más en trasladarse?<br>` +
+      `• ¿Quién tarda menos en trasladarse?<br>` +
+      `• Promedio de traslado<br><br>` +
       `<b>Navegación del mapa:</b><br>` +
       `• Muestra la capa de [nombre]<br>` +
       `• Oculta la capa de [nombre]<br>` +
@@ -1010,6 +1125,32 @@ const ChatAsistente = (() => {
     // Lista de técnicos
     if (contiene(t, "lista de técnicos", "lista de tecnicos", "cuáles técnicos", "cuales tecnicos", "qué técnicos")) {
       return accionListarTecnicos();
+    }
+
+    // Traslados — quién tarda más / menos
+    if (contiene(t, "tarda más", "tarda mas", "más tiempo", "mas tiempo", "más demora", "mas demora", "quién tarda más", "quien tarda mas", "más lento", "mas lento", "cuál técnico se demora más", "cual tecnico se demora mas")) {
+      return accionTecnicoMasDemora();
+    }
+    if (contiene(t, "tarda menos", "menos tiempo", "menos demora", "quién tarda menos", "quien tarda menos", "más rápido", "mas rapido", "cuál técnico se demora menos", "cual tecnico se demora menos")) {
+      return accionTecnicoMenosDemora();
+    }
+    if (contiene(t, "promedio de traslado", "promedio traslado", "tiempo promedio", "promedio de tiempo")) {
+      return accionPromedioTraslado();
+    }
+
+    // Ranking de asistencias
+    if (contiene(t, "ranking de asistencias", "ranking asistencias", "quién tiene más asistencias", "quien tiene mas asistencias", "más asistencias")) {
+      return accionRankingAsistencias();
+    }
+
+    // Ranking de traslados
+    if (contiene(t, "ranking de traslados", "ranking traslados", "ranking de traslado")) {
+      return accionRankingTraslado();
+    }
+
+    // Ranking de cantones
+    if (contiene(t, "ranking de cantones", "ranking cantones", "cuáles cantones tienen más", "cuales cantones tienen mas")) {
+      return accionRankingCantones();
     }
 
     // Contar asistencias
