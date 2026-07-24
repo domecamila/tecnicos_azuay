@@ -674,11 +674,13 @@ iniciar();
     if (norm.includes("asistencia")) return "asistencias";
     if (norm.includes("domicilio")) return "domicilios";
     if (norm.includes("ruta") || norm.includes("movilizacion") || norm.includes("traslado")) return "rutas";
-    if (norm.includes("buffer") || norm.includes("cobertura")) return "buffers";
+    if (norm.includes("buffer") || norm.includes("cobertura") || norm.includes("500 m") || norm.includes("1000 m") || norm.includes("5000 m")) return "buffers";
     if (norm.includes("area") || norm.includes("distribucion")) return "area_distribucion";
     if (norm.includes("poligono")) return "poligonos_asistencias";
     if (norm.includes("distrital") || norm.includes("oficina")) return "distrital";
     if (norm.includes("resumen") || norm.includes("todo") || norm.includes("general")) return "resumen";
+    if (norm.includes("rural") || norm.includes("urbano") || norm.includes("urbana")) return "zonas";
+    if (norm.includes("tiempo") || norm.includes("distancia") || norm.includes("km") || norm.includes("minuto")) return "rutas";
     return null;
   }
 
@@ -695,8 +697,8 @@ iniciar();
     const norm = normalizar(texto);
     const respuestas = [];
 
-    // Respuestas generales
-    if (norm.includes("cuantos tecnicos") || norm.includes("cuántos técnicos") || norm.includes("listado de tecnicos") || norm.includes("cuantos hay")) {
+    // Respuestas generales (sin filtro de técnico)
+    if (norm.includes("cuantos tecnicos") || norm.includes("cuantos hay") || norm.includes("listado de tecnicos")) {
       const tecnicos = [...new Set(
         (featuresPorCapa["asistencias"] || [])
           .concat(featuresPorCapa["poligonos_asistencias"] || [])
@@ -710,17 +712,46 @@ iniciar();
 
     if (norm.includes("que puedo preguntar") || norm.includes("que puedes") || norm.includes("ayuda") || norm.includes("que sabes")) {
       return `Puedo responder preguntas sobre:<ul>
-        <li><strong>Técnicos</strong>: "¿cuántos técnicos hay?", "¿quién es el técnico de...?"</li>
-        <li><strong>Asistencias</strong>: "¿cuántas asistencias tiene Julio Chimbo?", "asistencias en mayo"</li>
-        <li><strong>Rutas</strong>: "distancia promedio de traslado", "tiempo de ruta"</li>
-        <li><strong>Zonas</strong>: "cuántos en zona rural", "cuántos en zona urbana"</li>
-        <li><strong>Filtros</strong>: puedo aplicar filtros de técnico y fecha automáticamente</li>
-        <li><strong>Resumen</strong>: "dame un resumen general"</li>
+        <li><strong>Técnicos</strong>: "¿cuántos técnicos hay?"</li>
+        <li><strong>Asistencias</strong>: "asistencias de Julio Chimbo", "asistencias en mayo"</li>
+        <li><strong>Rutas</strong>: "tiempo de traslado", "distancia promedio"</li>
+        <li><strong>Zonas</strong>: "cuántos en zona rural"</li>
+        <li><strong>Buffers</strong>: "cobertura 500 metros"</li>
+        <li><strong>Resumen</strong>: "resumen de [técnico]"</li>
+        <li><strong>Filtros</strong>: aplico filtros automáticamente en el mapa</li>
+        <li><strong>Limpiar</strong>: "quitar filtros"</li>
       </ul>`;
     }
 
-    // Consulta de rutas / tiempo de traslado
-    if (tipo === "rutas" || norm.includes("tiempo") || norm.includes("distancia") || norm.includes("km") || norm.includes("minutos")) {
+    // Si solo menciona un técnico sin tema específico → resumen de ese técnico
+    if (!tipo && tecnico) {
+      const asist = (featuresPorCapa["asistencias"] || []).filter(f => String(f.properties.id_tec) === buscarIdTecnico(tecnico));
+      const domic = (featuresPorCapa["domicilios"] || []).filter(f => String(f.properties.id_tec) === buscarIdTecnico(tecnico));
+      const rutas = (featuresPorCapa["rutas"] || []).filter(f => String(f.properties.id_tec) === buscarIdTecnico(tecnico));
+      let rural = 0, urbano = 0;
+      asist.forEach(f => {
+        const clas = String(f.properties.clas || "").toLowerCase();
+        if (clas.includes("rural")) rural++;
+        if (clas.includes("urban")) urbano++;
+      });
+      const tecnicoProp = domic.length ? domic[0].properties : (asist.length ? asist[0].properties : {});
+      const domicilio = [tecnicoProp.b4__calle_, tecnicoProp.b3__parroq, tecnicoProp.b2__cantó].filter(Boolean).join(", ");
+
+      respuestas.push(`<strong>Resumen de ${tecnico}:</strong>`);
+      respuestas.push("<ul>");
+      if (domicilio) respuestas.push(`<li>Domicilio: ${domicilio}</li>`);
+      respuestas.push(`<li>Asistencias: <strong>${asist.length}</strong></li>`);
+      respuestas.push(`<li>Zona rural: <strong>${rural}</strong> | Urbana: <strong>${urbano}</strong></li>`);
+      if (rutas.length) {
+        const prom = (c) => rutas.reduce((s, f) => s + (parseFloat(f.properties[c]) || 0), 0) / rutas.length;
+        respuestas.push(`<li>Rutas: <strong>${rutas.length}</strong> (prom: ${prom("tiempo_min").toFixed(0)} min / ${prom("dist_km").toFixed(1)} km)</li>`);
+      }
+      respuestas.push("</ul>");
+      return respuestas.join("");
+    }
+
+    // Rutas / tiempo / distancia
+    if (tipo === "rutas") {
       let rutas = featuresPorCapa["rutas"] || [];
       if (tecnico) {
         const idTec = buscarIdTecnico(tecnico);
@@ -728,160 +759,100 @@ iniciar();
       }
       if (!rutas.length) return "No hay datos de rutas para esta consulta.";
       const prom = (campo) => rutas.reduce((s, f) => s + (parseFloat(f.properties[campo]) || 0), 0) / rutas.length;
-      const minProm = prom("tiempo_min");
-      const kmProm = prom("dist_km");
       respuestas.push(tecnico ? `<strong>Rutas de ${tecnico}:</strong>` : "<strong>Rutas (promedio general):</strong>");
-      respuestas.push(`<ul><li>Tiempo promedio: <strong>${minProm.toFixed(1)} min</strong></li>`);
-      respuestas.push(`<li>Distancia promedio: <strong>${kmProm.toFixed(1)} km</strong></li>`);
+      respuestas.push(`<ul><li>Tiempo promedio: <strong>${prom("tiempo_min").toFixed(1)} min</strong></li>`);
+      respuestas.push(`<li>Distancia promedio: <strong>${prom("dist_km").toFixed(1)} km</strong></li>`);
       respuestas.push(`<li>Rutas registradas: <strong>${rutas.length}</strong></li></ul>`);
       return respuestas.join("");
     }
 
     // Resumen general
-    if (tipo === "resumen" || norm.includes("resumen")) {
+    if (tipo === "resumen") {
       const asist = featuresPorCapa["asistencias"] || [];
       let asistFiltradas = asist;
-      if (tecnico) {
-        const idTec = buscarIdTecnico(tecnico);
-        if (idTec) asistFiltradas = asist.filter(f => String(f.properties.id_tec) === idTec);
-      }
-      if (fechas) {
-        asistFiltradas = asistFiltradas.filter(f => {
-          const fecha = parseFechaAsistencia(f.properties);
-          if (!fecha) return false;
-          if (fechas.desde && fecha < fechas.desde) return false;
-          if (fechas.hasta && fecha > fechas.hasta) return false;
-          return true;
-        });
-      }
+      if (tecnico) { const id = buscarIdTecnico(tecnico); if (id) asistFiltradas = asist.filter(f => String(f.properties.id_tec) === id); }
+      if (fechas) { asistFiltradas = asistFiltradas.filter(f => { const fecha = parseFechaAsistencia(f.properties); if (!fecha) return false; if (fechas.desde && fecha < fechas.desde) return false; if (fechas.hasta && fecha > fechas.hasta) return false; return true; }); }
       const domic = featuresPorCapa["domicilios"] || [];
       const rutas = featuresPorCapa["rutas"] || [];
       const TecUnicos = new Set(asistFiltradas.map(f => f.properties.tecnico_ma).filter(Boolean));
-
       let rural = 0, urbano = 0;
-      asistFiltradas.forEach(f => {
-        const clas = String(f.properties.clas || "").toLowerCase();
-        if (clas.includes("rural")) rural++;
-        if (clas.includes("urban")) urbano++;
-      });
-
-      respuestas.push(`<strong>Resumen${tecnico ? " de " + tecnico : ""}:</strong>`);
-      respuestas.push("<ul>");
+      asistFiltradas.forEach(f => { const clas = String(f.properties.clas || "").toLowerCase(); if (clas.includes("rural")) rural++; if (clas.includes("urban")) urbano++; });
+      respuestas.push(`<strong>Resumen${tecnico ? " de " + tecnico : ""}:</strong><ul>`);
       respuestas.push(`<li>Asistencias: <strong>${asistFiltradas.length}</strong></li>`);
-      respuestas.push(`<li>Técnicos con asistencias: <strong>${TecUnicos.size}</strong></li>`);
-      respuestas.push(`<li>Zona rural: <strong>${rural}</strong> | Urbana: <strong>${urbano}</strong></li>`);
-      respuestas.push(`<li>Domicilios registrados: <strong>${domic.length}</strong></li>`);
-      respuestas.push(`<li>Rutas: <strong>${rutas.length}</strong></li>`);
-      respuestas.push("</ul>");
+      respuestas.push(`<li>Técnicos: <strong>${TecUnicos.size}</strong></li>`);
+      respuestas.push(`<li>Rural: <strong>${rural}</strong> | Urbana: <strong>${urbano}</strong></li>`);
+      respuestas.push(`<li>Domicilios: <strong>${domic.length}</strong> | Rutas: <strong>${rutas.length}</strong></li></ul>`);
       return respuestas.join("");
     }
 
-    // Zonas rural/urbano
-    if (norm.includes("rural") || norm.includes("urbano") || norm.includes("urbana")) {
+    // Zonas
+    if (tipo === "zonas") {
       let asist = featuresPorCapa["asistencias"] || [];
-      if (tecnico) {
-        const idTec = buscarIdTecnico(tecnico);
-        if (idTec) asist = asist.filter(f => String(f.properties.id_tec) === idTec);
-      }
-      if (fechas) {
-        asist = asist.filter(f => {
-          const fecha = parseFechaAsistencia(f.properties);
-          if (!fecha) return false;
-          if (fechas.desde && fecha < fechas.desde) return false;
-          if (fechas.hasta && fecha > fechas.hasta) return false;
-          return true;
-        });
-      }
+      if (tecnico) { const id = buscarIdTecnico(tecnico); if (id) asist = asist.filter(f => String(f.properties.id_tec) === id); }
+      if (fechas) { asist = asist.filter(f => { const fecha = parseFechaAsistencia(f.properties); if (!fecha) return false; if (fechas.desde && fecha < fechas.desde) return false; if (fechas.hasta && fecha > fechas.hasta) return false; return true; }); }
       let rural = 0, urbano = 0;
-      asist.forEach(f => {
-        const clas = String(f.properties.clas || "").toLowerCase();
-        if (clas.includes("rural")) rural++;
-        if (clas.includes("urban")) urbano++;
-      });
-      respuestas.push(tecnico ? `<strong>${tecnico}:</strong>` : "<strong>Asistencias por zona:</strong>");
+      asist.forEach(f => { const clas = String(f.properties.clas || "").toLowerCase(); if (clas.includes("rural")) rural++; if (clas.includes("urban")) urbano++; });
+      respuestas.push(tecnico ? `<strong>${tecnico} - Zonas:</strong>` : "<strong>Asistencias por zona:</strong>");
       respuestas.push(`<ul><li>Rural: <strong>${rural}</strong></li><li>Urbana: <strong>${urbano}</strong></li></ul>`);
       return respuestas.join("");
     }
 
     // Buffers
-    if (tipo === "buffers" || norm.includes("500") || norm.includes("1000") || norm.includes("5000")) {
+    if (tipo === "buffers") {
       let asist = featuresPorCapa["asistencias"] || [];
-      if (tecnico) {
-        const idTec = buscarIdTecnico(tecnico);
-        if (idTec) asist = asist.filter(f => String(f.properties.id_tec) === idTec);
-      }
-      if (fechas) {
-        asist = asist.filter(f => {
-          const fecha = parseFechaAsistencia(f.properties);
-          if (!fecha) return false;
-          if (fechas.desde && fecha < fechas.desde) return false;
-          if (fechas.hasta && fecha > fechas.hasta) return false;
-          return true;
-        });
-      }
+      if (tecnico) { const id = buscarIdTecnico(tecnico); if (id) asist = asist.filter(f => String(f.properties.id_tec) === id); }
+      if (fechas) { asist = asist.filter(f => { const fecha = parseFechaAsistencia(f.properties); if (!fecha) return false; if (fechas.desde && fecha < fechas.desde) return false; if (fechas.hasta && fecha > fechas.hasta) return false; return true; }); }
       let d500 = 0, d1000 = 0, d5000 = 0, fuera = 0;
-      asist.forEach(f => {
-        if (esVerdadero(f.properties.buffer_500)) d500++;
-        if (esVerdadero(f.properties.buffer_100)) d1000++;
-        if (esVerdadero(f.properties.buffer_501)) d5000++; else fuera++;
-      });
-      respuestas.push(tecnico ? `<strong>${tecnico} - Cobertura por buffers:</strong>` : "<strong>Cobertura por buffers:</strong>");
+      asist.forEach(f => { if (esVerdadero(f.properties.buffer_500)) d500++; if (esVerdadero(f.properties.buffer_100)) d1000++; if (esVerdadero(f.properties.buffer_501)) d5000++; else fuera++; });
+      respuestas.push(tecnico ? `<strong>${tecnico} - Cobertura:</strong>` : "<strong>Cobertura por buffers:</strong>");
       respuestas.push("<ul>");
-      respuestas.push(`<li>Dentro de 500 m: <strong>${d500}</strong></li>`);
-      respuestas.push(`<li>Dentro de 1000 m: <strong>${d1000}</strong></li>`);
-      respuestas.push(`<li>Dentro de 5000 m: <strong>${d5000}</strong></li>`);
-      respuestas.push(`<li>Fuera de 5000 m: <strong>${fuera}</strong></li>`);
-      respuestas.push("</ul>");
+      respuestas.push(`<li>500 m: <strong>${d500}</strong></li><li>1000 m: <strong>${d1000}</strong></li><li>5000 m: <strong>${d5000}</strong></li><li>Fuera: <strong>${fuera}</strong></li></ul>`);
       return respuestas.join("");
     }
 
-    // Asistencias (por defecto si menciona un técnico)
-    let asist = featuresPorCapa["asistencias"] || [];
-    if (tecnico) {
-      const idTec = buscarIdTecnico(tecnico);
-      if (idTec) asist = asist.filter(f => String(f.properties.id_tec) === idTec);
-    }
-    if (fechas) {
-      asist = asist.filter(f => {
-        const fecha = parseFechaAsistencia(f.properties);
-        if (!fecha) return false;
-        if (fechas.desde && fecha < fechas.desde) return false;
-        if (fechas.hasta && fecha > fechas.hasta) return false;
-        return true;
-      });
+    // Domicilios
+    if (tipo === "domicilios") {
+      let domic = featuresPorCapa["domicilios"] || [];
+      if (tecnico) { const id = buscarIdTecnico(tecnico); if (id) domic = domic.filter(f => String(f.properties.id_tec) === id); }
+      if (!domic.length) return "No hay datos de domicilios para esta consulta.";
+      respuestas.push(tecnico ? `<strong>Domicilio de ${tecnico}:</strong>` : `<strong>Domicilios: ${domic.length}</strong>`);
+      if (domic.length === 1) {
+        const p = domic[0].properties;
+        respuestas.push("<ul>");
+        if (p.b1__provin) respuestas.push(`<li>Provincia: ${p.b1__provin}</li>`);
+        if (p.b2__cantó) respuestas.push(`<li>Cantón: ${p.b2__cantó}</li>`);
+        if (p.b3__parroq) respuestas.push(`<li>Parroquia: ${p.b3__parroq}</li>`);
+        if (p.b4__calle_) respuestas.push(`<li>Calle: ${p.b4__calle_} ${p.b5__númer || ""}</li>`);
+        respuestas.push("</ul>");
+      }
+      return respuestas.join("");
     }
 
-    if (asist.length === 0) return "No se encontraron asistencias para esta consulta.";
+    // Asistencias (por defecto)
+    let asist = featuresPorCapa["asistencias"] || [];
+    if (tecnico) { const id = buscarIdTecnico(tecnico); if (id) asist = asist.filter(f => String(f.properties.id_tec) === id); }
+    if (fechas) { asist = asist.filter(f => { const fecha = parseFechaAsistencia(f.properties); if (!fecha) return false; if (fechas.desde && fecha < fechas.desde) return false; if (fechas.hasta && fecha > fechas.hasta) return false; return true; }); }
+
+    if (!asist.length) return "No se encontraron asistencias para esta consulta.";
 
     respuestas.push(tecnico ? `<strong>Asistencias de ${tecnico}:</strong>` : "<strong>Asistencias encontradas:</strong>");
     respuestas.push(`<ul><li>Total: <strong>${asist.length}</strong></li>`);
 
-    // Por cantón
     const porCanton = contarPorCampo(asist, "nombre_can");
     if (porCanton.length > 0 && porCanton.length <= 20) {
-      respuestas.push("<li>Por cantón: " + porCanton.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
+      respuestas.push("<li>Cantones: " + porCanton.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
     }
-
-    // Por parroquia (top 5)
     const porParroquia = contarPorCampo(asist, "nombre_par").slice(0, 5);
     if (porParroquia.length > 0) {
-      respuestas.push("<li>Principales parroquias: " + porParroquia.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
+      respuestas.push("<li>Parroquias: " + porParroquia.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
     }
-
-    // Por tipo de visita
     const porTipo = contarPorCampo(asist, "tipo_vis");
     if (porTipo.length > 0 && porTipo.length <= 10) {
-      respuestas.push("<li>Por tipo: " + porTipo.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
+      respuestas.push("<li>Tipo: " + porTipo.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
     }
-
     let rural = 0, urbano = 0;
-    asist.forEach(f => {
-      const clas = String(f.properties.clas || "").toLowerCase();
-      if (clas.includes("rural")) rural++;
-      if (clas.includes("urban")) urbano++;
-    });
-    respuestas.push(`<li>Rural: <strong>${rural}</strong> | Urbana: <strong>${urbano}</strong></li>`);
-    respuestas.push("</ul>");
+    asist.forEach(f => { const clas = String(f.properties.clas || "").toLowerCase(); if (clas.includes("rural")) rural++; if (clas.includes("urban")) urbano++; });
+    respuestas.push(`<li>Rural: <strong>${rural}</strong> | Urbana: <strong>${urbano}</strong></li></ul>`);
     return respuestas.join("");
   }
 
