@@ -658,6 +658,29 @@ const ChatAsistente = (() => {
     return null;
   }
 
+  // Mapa id_tec -> nombre del técnico (construido desde poligonos_asistencias y domicilios)
+  function construirMapaNombres() {
+    const mapa = new Map();
+    const fuentes = [
+      ...(featuresPorCapa["poligonos_asistencias"] || []),
+      ...(featuresPorCapa["domicilios"] || []),
+      ...(featuresPorCapa["asistencias"] || []),
+    ];
+    fuentes.forEach(f => {
+      const p = f.properties;
+      const id = String(p.id_tec || p.cedula_pro || p.a1__númer || "").trim();
+      const nombre = p.tecnico_ma || p.a2_nombres || "";
+      if (id && nombre && !mapa.has(id)) mapa.set(id, nombre);
+    });
+    return mapa;
+  }
+
+  function nombreTecnico(idTec) {
+    if (!idTec) return "?";
+    const mapa = construirMapaNombres();
+    return mapa.get(String(idTec).trim()) || String(idTec);
+  }
+
   // ==================== ACCIONES ====================
 
   function accionResumenGeneral() {
@@ -959,7 +982,7 @@ const ChatAsistente = (() => {
       if (!id) return;
       const tiempo = parseFloat(p.tiempo_min) || 0;
       const dist = parseFloat(p.dist_km) || 0;
-      mapaTec.set(id, { tiempo, dist, nombre: p.tecnico_ma || id });
+      mapaTec.set(id, { tiempo, dist, nombre: nombreTecnico(id) });
     });
 
     const lista = [...mapaTec.values()].sort((a, b) => b.tiempo - a.tiempo);
@@ -1018,7 +1041,7 @@ const ChatAsistente = (() => {
       const p = f.properties;
       const tiempo = parseFloat(p.tiempo_min) || 0;
       if (!max || tiempo > max.tiempo) {
-        max = { nombre: p.tecnico_ma || p.id_tec || "?", tiempo, dist: parseFloat(p.dist_km) || 0 };
+        max = { id: p.id_tec, nombre: nombreTecnico(p.id_tec), tiempo, dist: parseFloat(p.dist_km) || 0 };
       }
     });
 
@@ -1034,7 +1057,7 @@ const ChatAsistente = (() => {
       const p = f.properties;
       const tiempo = parseFloat(p.tiempo_min) || 0;
       if (!min || (tiempo > 0 && tiempo < min.tiempo)) {
-        min = { nombre: p.tecnico_ma || p.id_tec || "?", tiempo, dist: parseFloat(p.dist_km) || 0 };
+        min = { id: p.id_tec, nombre: nombreTecnico(p.id_tec), tiempo, dist: parseFloat(p.dist_km) || 0 };
       }
     });
 
