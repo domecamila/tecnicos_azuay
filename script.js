@@ -532,7 +532,7 @@ document.getElementById("btn-limpiar-filtros").addEventListener("click", () => {
 iniciar();
 
 // =============================================
-// Chatbot IA
+// Asistente simple del geoportal (sin API externa)
 // =============================================
 (function() {
   const chatToggle = document.getElementById("chatbot-toggle");
@@ -541,112 +541,408 @@ iniciar();
   const chatMessages = document.getElementById("chatbot-messages");
   const chatInput = document.getElementById("chatbot-text");
   const chatSend = document.getElementById("chatbot-send");
-  const chatApi = document.getElementById("chatbot-api");
-  const chatKeyInput = document.getElementById("chatbot-key");
-  const chatKeySave = document.getElementById("chatbot-key-save");
 
-  let apiKey = localStorage.getItem("openai_api_key") || "";
+  chatToggle.addEventListener("click", () => chatPanel.classList.toggle("open"));
+  chatClose.addEventListener("click", () => chatPanel.classList.remove("open"));
 
-  function togglePanel() {
-    chatPanel.classList.toggle("open");
-  }
-  chatToggle.addEventListener("click", togglePanel);
-  chatClose.addEventListener("click", togglePanel);
-
-  if (apiKey) {
-    chatApi.classList.remove("visible");
-    chatInput.disabled = false;
-    chatSend.disabled = false;
-  } else {
-    chatApi.classList.add("visible");
-  }
-
-  chatKeySave.addEventListener("click", () => {
-    const k = chatKeyInput.value.trim();
-    if (!k) return;
-    apiKey = k;
-    localStorage.setItem("openai_api_key", k);
-    chatApi.classList.remove("visible");
-    chatInput.disabled = false;
-    chatSend.disabled = false;
-    chatInput.focus();
-  });
-
-  function addMsg(text, cls) {
+  function addMsg(html, cls) {
     const div = document.createElement("div");
     div.className = `chat-msg ${cls}`;
-    div.textContent = text;
+    div.innerHTML = html;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
-    return div;
   }
 
-  function buildContext() {
-    const ctx = [];
-    for (const capa of CAPAS) {
-      const feats = featuresPorCapa[capa.id] || [];
-      if (!feats.length) continue;
-      const muestra = feats.slice(0, 5);
-      const campos = muestra.map(f => {
-        const p = { ...f.properties };
-        delete p.geom;
-        delete p.geojson;
-        return JSON.stringify(p);
-      });
-      ctx.push(`Capa "${capa.id}" (${feats.length} registros, mostrando ${muestra.length}):\n${campos.join("\n")}`);
+  // Nombres de mes en español
+  const MES_NOM = {
+    enero:0, febrero:1, marzo:2, abril:3, mayo:4, junio:5,
+    julio:6, agosto:7, septiembre:8, setiembre:8, octubre:9, noviembre:10, diciembre:11
+  };
+  const MES_ABREV = {
+    ene:0, feb:1, mar:2, abr:3, may:4, jun:5,
+    jul:6, ago:7, sep:8, oct:9, nov:10, dic:11
+  };
+
+  function normalizar(s) {
+    return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  }
+
+  // Buscar técnico por nombre parcial (fuzzy)
+  function buscarTecnico(texto) {
+    const norm = normalizar(texto);
+    const tecnicos = [...new Set(
+      (featuresPorCapa["asistencias"] || [])
+        .concat(featuresPorCapa["poligonos_asistencias"] || [])
+        .map(f => f.properties.tecnico_ma)
+        .filter(Boolean)
+    )];
+    // Intento exacto
+    let encontrado = tecnicos.find(t => normalizar(t) === norm);
+    if (encontrado) return encontrado;
+    // Contiene
+    encontrado = tecnicos.find(t => normalizar(t).includes(norm) || norm.includes(normalizar(t)));
+    if (encontrado) return encontrado;
+    // Por palabras
+    const palabras = norm.split(/\s+/);
+    encontrado = tecnicos.find(t => {
+      const tn = normalizar(t);
+      return palabras.every(p => tn.includes(p));
+    });
+    return encontrado || null;
+  }
+
+  function buscarIdTecnico(nombre) {
+    const norm = normalizar(nombre);
+    const feats = (featuresPorCapa["asistencias"] || [])
+      .concat(featuresPorCapa["poligonos_asistencias"] || []);
+    for (const f of feats) {
+      if (f.properties.tecnico_ma && normalizar(f.properties.tecnico_ma) === norm) {
+        return String(f.properties.id_tec);
+      }
     }
-    const filtrosActivos = [];
-    if (FILTROS.tecnico !== "todos") filtrosActivos.push(`técnico=${FILTROS.tecnico}`);
-    if (FILTROS.desde) filtrosActivos.push(`desde=${FILTROS.desde.toISOString().slice(0,10)}`);
-    if (FILTROS.hasta) filtrosActivos.push(`hasta=${FILTROS.hasta.toISOString().slice(0,10)}`);
-    if (filtrosActivos.length) ctx.push(`Filtros activos: ${filtrosActivos.join(", ")}`);
-    return ctx.join("\n\n");
+    return null;
   }
 
-  async function enviar() {
+  // Detectar fechas en el texto
+  function detectarFechas(texto) {
+    const norm = normalizar(texto);
+    const hoy = new Date();
+    let desde = null, hasta = null;
+
+    // "semana pasada"
+    if (norm.includes("semana pasada")) {
+      hasta = new Date(hoy); hasta.setDate(hoy.getDate() - hoy.getDay());
+      desde = new Date(hasta); desde.setDate(hasta.getDate() - 6);
+      return { desde, hasta };
+    }
+    // "semana anterior"
+    if (norm.includes("semana anterior")) {
+      hasta = new Date(hoy); hasta.setDate(hoy.getDate() - hoy.getDay() - 7);
+      desde = new Date(hasta); desde.setDate(hasta.getDate() - 6);
+      return { desde, hasta };
+    }
+    // "este mes"
+    if (norm.includes("este mes")) {
+      desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      hasta = hoy;
+      return { desde, hasta };
+    }
+    // "mes pasado"
+    if (norm.includes("mes pasado") || norm.includes("el mes anterior")) {
+      const mp = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+      desde = mp;
+      hasta = new Date(mp.getFullYear(), mp.getMonth() + 1, 0);
+      return { desde, hasta };
+    }
+    // "año anterior" / "el año pasado"
+    if (norm.includes("ano anterior") || norm.includes("ano pasado") || norm.includes("año anterior") || norm.includes("año pasado")) {
+      desde = new Date(hoy.getFullYear() - 1, 0, 1);
+      hasta = new Date(hoy.getFullYear() - 1, 11, 31);
+      return { desde, hasta };
+    }
+    // "este año"
+    if (norm.includes("este ano") || norm.includes("este año")) {
+      desde = new Date(hoy.getFullYear(), 0, 1);
+      hasta = hoy;
+      return { desde, hasta };
+    }
+
+    // Buscar nombre de mes
+    for (const [nom, idx] of Object.entries(MES_NOM)) {
+      if (norm.includes(nom)) {
+        const anio = hoy.getFullYear();
+        desde = new Date(anio, idx, 1);
+        hasta = new Date(anio, idx + 1, 0);
+        return { desde, hasta };
+      }
+    }
+    for (const [abrev, idx] of Object.entries(MES_ABREV)) {
+      if (norm.includes(abrev)) {
+        const anio = hoy.getFullYear();
+        desde = new Date(anio, idx, 1);
+        hasta = new Date(anio, idx + 1, 0);
+        return { desde, hasta };
+      }
+    }
+
+    return null;
+  }
+
+  // Detectar qué tipo de consulta quiere
+  function detectarTipoConsulta(texto) {
+    const norm = normalizar(texto);
+    if (norm.includes("asistencia")) return "asistencias";
+    if (norm.includes("domicilio")) return "domicilios";
+    if (norm.includes("ruta") || norm.includes("movilizacion") || norm.includes("traslado")) return "rutas";
+    if (norm.includes("buffer") || norm.includes("cobertura")) return "buffers";
+    if (norm.includes("area") || norm.includes("distribucion")) return "area_distribucion";
+    if (norm.includes("poligono")) return "poligonos_asistencias";
+    if (norm.includes("distrital") || norm.includes("oficina")) return "distrital";
+    if (norm.includes("resumen") || norm.includes("todo") || norm.includes("general")) return "resumen";
+    return null;
+  }
+
+  function contarPorCampo(features, campo) {
+    const mapa = {};
+    features.forEach(f => {
+      const val = f.properties[campo] || "Sin dato";
+      mapa[val] = (mapa[val] || 0) + 1;
+    });
+    return Object.entries(mapa).sort((a, b) => b[1] - a[1]);
+  }
+
+  function generarRespuesta(tipo, tecnico, fechas, texto) {
+    const norm = normalizar(texto);
+    const respuestas = [];
+
+    // Respuestas generales
+    if (norm.includes("cuantos tecnicos") || norm.includes("cuántos técnicos") || norm.includes("listado de tecnicos") || norm.includes("cuantos hay")) {
+      const tecnicos = [...new Set(
+        (featuresPorCapa["asistencias"] || [])
+          .concat(featuresPorCapa["poligonos_asistencias"] || [])
+          .map(f => f.properties.tecnico_ma)
+          .filter(Boolean)
+      )].sort();
+      respuestas.push(`<strong>Técnicos registrados: ${tecnicos.length}</strong>`);
+      respuestas.push("<ul>" + tecnicos.map(t => `<li>${t}</li>`).join("") + "</ul>");
+      return respuestas.join("");
+    }
+
+    if (norm.includes("que puedo preguntar") || norm.includes("que puedes") || norm.includes("ayuda") || norm.includes("que sabes")) {
+      return `Puedo responder preguntas sobre:<ul>
+        <li><strong>Técnicos</strong>: "¿cuántos técnicos hay?", "¿quién es el técnico de...?"</li>
+        <li><strong>Asistencias</strong>: "¿cuántas asistencias tiene Julio Chimbo?", "asistencias en mayo"</li>
+        <li><strong>Rutas</strong>: "distancia promedio de traslado", "tiempo de ruta"</li>
+        <li><strong>Zonas</strong>: "cuántos en zona rural", "cuántos en zona urbana"</li>
+        <li><strong>Filtros</strong>: puedo aplicar filtros de técnico y fecha automáticamente</li>
+        <li><strong>Resumen</strong>: "dame un resumen general"</li>
+      </ul>`;
+    }
+
+    // Consulta de rutas / tiempo de traslado
+    if (tipo === "rutas" || norm.includes("tiempo") || norm.includes("distancia") || norm.includes("km") || norm.includes("minutos")) {
+      let rutas = featuresPorCapa["rutas"] || [];
+      if (tecnico) {
+        const idTec = buscarIdTecnico(tecnico);
+        if (idTec) rutas = rutas.filter(f => String(f.properties.id_tec) === idTec);
+      }
+      if (!rutas.length) return "No hay datos de rutas para esta consulta.";
+      const prom = (campo) => rutas.reduce((s, f) => s + (parseFloat(f.properties[campo]) || 0), 0) / rutas.length;
+      const minProm = prom("tiempo_min");
+      const kmProm = prom("dist_km");
+      respuestas.push(tecnico ? `<strong>Rutas de ${tecnico}:</strong>` : "<strong>Rutas (promedio general):</strong>");
+      respuestas.push(`<ul><li>Tiempo promedio: <strong>${minProm.toFixed(1)} min</strong></li>`);
+      respuestas.push(`<li>Distancia promedio: <strong>${kmProm.toFixed(1)} km</strong></li>`);
+      respuestas.push(`<li>Rutas registradas: <strong>${rutas.length}</strong></li></ul>`);
+      return respuestas.join("");
+    }
+
+    // Resumen general
+    if (tipo === "resumen" || norm.includes("resumen")) {
+      const asist = featuresPorCapa["asistencias"] || [];
+      let asistFiltradas = asist;
+      if (tecnico) {
+        const idTec = buscarIdTecnico(tecnico);
+        if (idTec) asistFiltradas = asist.filter(f => String(f.properties.id_tec) === idTec);
+      }
+      if (fechas) {
+        asistFiltradas = asistFiltradas.filter(f => {
+          const fecha = parseFechaAsistencia(f.properties);
+          if (!fecha) return false;
+          if (fechas.desde && fecha < fechas.desde) return false;
+          if (fechas.hasta && fecha > fechas.hasta) return false;
+          return true;
+        });
+      }
+      const domic = featuresPorCapa["domicilios"] || [];
+      const rutas = featuresPorCapa["rutas"] || [];
+      const TecUnicos = new Set(asistFiltradas.map(f => f.properties.tecnico_ma).filter(Boolean));
+
+      let rural = 0, urbano = 0;
+      asistFiltradas.forEach(f => {
+        const clas = String(f.properties.clas || "").toLowerCase();
+        if (clas.includes("rural")) rural++;
+        if (clas.includes("urban")) urbano++;
+      });
+
+      respuestas.push(`<strong>Resumen${tecnico ? " de " + tecnico : ""}:</strong>`);
+      respuestas.push("<ul>");
+      respuestas.push(`<li>Asistencias: <strong>${asistFiltradas.length}</strong></li>`);
+      respuestas.push(`<li>Técnicos con asistencias: <strong>${TecUnicos.size}</strong></li>`);
+      respuestas.push(`<li>Zona rural: <strong>${rural}</strong> | Urbana: <strong>${urbano}</strong></li>`);
+      respuestas.push(`<li>Domicilios registrados: <strong>${domic.length}</strong></li>`);
+      respuestas.push(`<li>Rutas: <strong>${rutas.length}</strong></li>`);
+      respuestas.push("</ul>");
+      return respuestas.join("");
+    }
+
+    // Zonas rural/urbano
+    if (norm.includes("rural") || norm.includes("urbano") || norm.includes("urbana")) {
+      let asist = featuresPorCapa["asistencias"] || [];
+      if (tecnico) {
+        const idTec = buscarIdTecnico(tecnico);
+        if (idTec) asist = asist.filter(f => String(f.properties.id_tec) === idTec);
+      }
+      if (fechas) {
+        asist = asist.filter(f => {
+          const fecha = parseFechaAsistencia(f.properties);
+          if (!fecha) return false;
+          if (fechas.desde && fecha < fechas.desde) return false;
+          if (fechas.hasta && fecha > fechas.hasta) return false;
+          return true;
+        });
+      }
+      let rural = 0, urbano = 0;
+      asist.forEach(f => {
+        const clas = String(f.properties.clas || "").toLowerCase();
+        if (clas.includes("rural")) rural++;
+        if (clas.includes("urban")) urbano++;
+      });
+      respuestas.push(tecnico ? `<strong>${tecnico}:</strong>` : "<strong>Asistencias por zona:</strong>");
+      respuestas.push(`<ul><li>Rural: <strong>${rural}</strong></li><li>Urbana: <strong>${urbano}</strong></li></ul>`);
+      return respuestas.join("");
+    }
+
+    // Buffers
+    if (tipo === "buffers" || norm.includes("500") || norm.includes("1000") || norm.includes("5000")) {
+      let asist = featuresPorCapa["asistencias"] || [];
+      if (tecnico) {
+        const idTec = buscarIdTecnico(tecnico);
+        if (idTec) asist = asist.filter(f => String(f.properties.id_tec) === idTec);
+      }
+      if (fechas) {
+        asist = asist.filter(f => {
+          const fecha = parseFechaAsistencia(f.properties);
+          if (!fecha) return false;
+          if (fechas.desde && fecha < fechas.desde) return false;
+          if (fechas.hasta && fecha > fechas.hasta) return false;
+          return true;
+        });
+      }
+      let d500 = 0, d1000 = 0, d5000 = 0, fuera = 0;
+      asist.forEach(f => {
+        if (esVerdadero(f.properties.buffer_500)) d500++;
+        if (esVerdadero(f.properties.buffer_100)) d1000++;
+        if (esVerdadero(f.properties.buffer_501)) d5000++; else fuera++;
+      });
+      respuestas.push(tecnico ? `<strong>${tecnico} - Cobertura por buffers:</strong>` : "<strong>Cobertura por buffers:</strong>");
+      respuestas.push("<ul>");
+      respuestas.push(`<li>Dentro de 500 m: <strong>${d500}</strong></li>`);
+      respuestas.push(`<li>Dentro de 1000 m: <strong>${d1000}</strong></li>`);
+      respuestas.push(`<li>Dentro de 5000 m: <strong>${d5000}</strong></li>`);
+      respuestas.push(`<li>Fuera de 5000 m: <strong>${fuera}</strong></li>`);
+      respuestas.push("</ul>");
+      return respuestas.join("");
+    }
+
+    // Asistencias (por defecto si menciona un técnico)
+    let asist = featuresPorCapa["asistencias"] || [];
+    if (tecnico) {
+      const idTec = buscarIdTecnico(tecnico);
+      if (idTec) asist = asist.filter(f => String(f.properties.id_tec) === idTec);
+    }
+    if (fechas) {
+      asist = asist.filter(f => {
+        const fecha = parseFechaAsistencia(f.properties);
+        if (!fecha) return false;
+        if (fechas.desde && fecha < fechas.desde) return false;
+        if (fechas.hasta && fecha > fechas.hasta) return false;
+        return true;
+      });
+    }
+
+    if (asist.length === 0) return "No se encontraron asistencias para esta consulta.";
+
+    respuestas.push(tecnico ? `<strong>Asistencias de ${tecnico}:</strong>` : "<strong>Asistencias encontradas:</strong>");
+    respuestas.push(`<ul><li>Total: <strong>${asist.length}</strong></li>`);
+
+    // Por cantón
+    const porCanton = contarPorCampo(asist, "nombre_can");
+    if (porCanton.length > 0 && porCanton.length <= 20) {
+      respuestas.push("<li>Por cantón: " + porCanton.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
+    }
+
+    // Por parroquia (top 5)
+    const porParroquia = contarPorCampo(asist, "nombre_par").slice(0, 5);
+    if (porParroquia.length > 0) {
+      respuestas.push("<li>Principales parroquias: " + porParroquia.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
+    }
+
+    // Por tipo de visita
+    const porTipo = contarPorCampo(asist, "tipo_vis");
+    if (porTipo.length > 0 && porTipo.length <= 10) {
+      respuestas.push("<li>Por tipo: " + porTipo.map(([k, v]) => `${k} (${v})`).join(", ") + "</li>");
+    }
+
+    let rural = 0, urbano = 0;
+    asist.forEach(f => {
+      const clas = String(f.properties.clas || "").toLowerCase();
+      if (clas.includes("rural")) rural++;
+      if (clas.includes("urban")) urbano++;
+    });
+    respuestas.push(`<li>Rural: <strong>${rural}</strong> | Urbana: <strong>${urbano}</strong></li>`);
+    respuestas.push("</ul>");
+    return respuestas.join("");
+  }
+
+  function procesar() {
     const texto = chatInput.value.trim();
-    if (!texto || !apiKey) return;
+    if (!texto) return;
     chatInput.value = "";
 
     addMsg(texto, "chat-user");
-    const loading = addMsg("Pensando...", "chat-loading");
 
-    const context = buildContext();
-    const systemPrompt = `Eres un asistente geográfico del Geoportal de Distribución de Técnicos en Azuay, Ecuador. Responde en español de forma breve y clara. Tienes acceso a estos datos del geoportal:\n\n${context}\n\nResponde SOLO basándote en los datos disponibles. Si no tienes información para una pregunta, di que no puedes responderla.`;
+    const norm = normalizar(texto);
 
-    try {
-      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-3.5-turbo",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: texto },
-          ],
-          max_tokens: 500,
-          temperature: 0.3,
-        }),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Error ${resp.status}`);
-      }
-
-      const data = await resp.json();
-      const reply = data.choices?.[0]?.message?.content || "No obtuve respuesta.";
-      loading.remove();
-      addMsg(reply, "chat-bot");
-    } catch (err) {
-      loading.remove();
-      addMsg(`Error: ${err.message}`, "chat-loading");
+    // 1. Detectar técnico
+    const nombreEncontrado = buscarTecnico(texto);
+    let tecnico = null;
+    let idTec = null;
+    if (nombreEncontrado) {
+      tecnico = nombreEncontrado;
+      idTec = buscarIdTecnico(nombreEncontrado);
     }
+
+    // 2. Detectar fechas
+    const fechas = detectarFechas(texto);
+
+    // 3. Detectar tipo de consulta
+    const tipo = detectarTipoConsulta(texto);
+
+    // 4. Aplicar filtros al mapa si se detectaron
+    if (idTec) {
+      FILTROS.tecnico = idTec;
+      document.getElementById("filtro-tecnico").value = idTec;
+    } else if (norm.includes("todos") || norm.includes("limpiar") || norm.includes("quitar filtro")) {
+      FILTROS.tecnico = "todos";
+      FILTROS.desde = null;
+      FILTROS.hasta = null;
+      document.getElementById("filtro-tecnico").value = "todos";
+      document.getElementById("filtro-desde").value = "";
+      document.getElementById("filtro-hasta").value = "";
+      redibujarTodas();
+      actualizarTiempoTraslado();
+      addMsg("Filtros limpiados. Se muestran todos los datos.", "chat-bot");
+      return;
+    }
+
+    if (fechas) {
+      FILTROS.desde = fechas.desde;
+      FILTROS.hasta = fechas.hasta;
+      const fmt = d => d.toISOString().slice(0, 10);
+      document.getElementById("filtro-desde").value = fmt(fechas.desde);
+      document.getElementById("filtro-hasta").value = fmt(fechas.hasta);
+    }
+
+    // Redibujar con filtros
+    redibujarTodas();
+    actualizarTiempoTraslado();
+
+    // 5. Generar respuesta
+    const respuesta = generarRespuesta(tipo, tecnico, fechas, texto);
+    addMsg(respuesta, "chat-bot");
   }
 
-  chatSend.addEventListener("click", enviar);
-  chatInput.addEventListener("keydown", e => { if (e.key === "Enter") enviar(); });
+  chatSend.addEventListener("click", procesar);
+  chatInput.addEventListener("keydown", e => { if (e.key === "Enter") procesar(); });
 })();
