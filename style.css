@@ -206,8 +206,8 @@ html, body {
   flex-shrink: 0;
 }
 
-.swatch-distrital { background: var(--ink); }
-.swatch-domicilios { background: var(--green); }
+.swatch-distrital { background: none; font-size: 14px; text-align: center; line-height: 12px; }
+.swatch-domicilios { background: none; font-size: 14px; text-align: center; line-height: 12px; }
 .swatch-asistencias { background: var(--ochre); }
 .swatch-rutas { background: var(--terracotta); border-radius: 2px; }
 .swatch-area { background: var(--green-soft); border-radius: 2px; }

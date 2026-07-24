@@ -231,6 +231,17 @@ function estiloCapa(capa) {
       pointToLayer: (f, latlng) => L.marker(latlng, { icon: officeIcon })
     };
   }
+  if (capa.id === "domicilios") {
+    const homeIcon = L.divIcon({
+      html: '<div style="font-size:20px;line-height:1;text-align:center;filter:drop-shadow(1px 1px 2px rgba(0,0,0,.4))">🏠</div>',
+      className: "",
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    });
+    return {
+      pointToLayer: (f, latlng) => L.marker(latlng, { icon: homeIcon })
+    };
+  }
   if (capa.tipo === "point") {
     return {
       pointToLayer: (f, latlng) => L.circleMarker(latlng, {
